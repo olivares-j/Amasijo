@@ -7,9 +7,8 @@ from time import time
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
-from kalkayotl.Transformations import phaseSpaceToAstrometry_and_RV
-from kalkayotl.Functions import AngularSeparation,CovarianceParallax
-from kalkayotl.distributions import eff,king,toCartesian
+from Functions import AngularSeparation,CovarianceParallax
+from distributions import eff,king,toCartesian
 
 from pygaia.astrometry.vectorastrometry import cartesian_to_spherical
 from pygaia.errors.astrometric import parallax_uncertainty,total_position_uncertainty
@@ -163,30 +162,33 @@ class Amasijo(object):
 		
 		return df
 
-	#========== Saves the synthetic data ===================================
-	def save_data(self,file,index_label="source_id"):
+	#================= Generate cluster ==========================
+	def generate_cluster(self,file,n_stars=100,
+						parallax_spatial_correlations="Vasiliev+2019",
+						index_label="source_id",
+						release='dr3'):
+
+		print("Generating synthetic data ...")
+
+		#---------- Phase space coordinates --------------------------------------------------
+		X = self._generate_phase_space(n_stars=n_stars,
+							astrometric_args=self.astrometric_args)
+
+		#--------------------- True values -----------------------------------------------------
+		true,df_ph,cov_corr = self._generate_true_values(X,
+									photometric_args=self.photometric_args,
+									parallax_spatial_correlations=parallax_spatial_correlations)
+
+		#------------- Adds uncertainty ---------------------------------------
+		self.df = self._assign_uncertainty(true,df_ph,cov_corr,release=release)
 
 		#----------- Save data frame ----------------------------
 		self.df.to_csv(path_or_buf=file,index_label=index_label)
-		
-	#======================================================================
-
-	#================= Generate cluster ==========================
-	def generate_cluster(self,n_stars=100,
-						parallax_spatial_correlations="Vasiliev+2019",
-						release='dr3'):
-		print("Generating observables ...")
-
-		X = self._generate_phase_space(n_stars=n_stars,astrometric_args=self.astrometric_args)
-
-		true,df_ph,cov_corr = self._generate_true_values(X,photometric_args=self.photometric_args,
-										parallax_spatial_correlations=parallax_spatial_correlations)
-
-		self.df = self._assign_uncertainty(true,df_ph,cov_corr,release=release)
 
 
 	#=========================Plot =====================================================
 	def plot_cluster(self,file_plot):
+		print("Plotting ...")
 		pdf = PdfPages(filename=file_plot)
 		n_bins = 100
 
@@ -200,7 +202,7 @@ class Amasijo(object):
 		plt.figure()
 		plt.hist(self.df["parallax"],density=False,histtype="step",bins=n_bins,alpha=0.5)
 		plt.ylabel("Density")
-		plt.xlabel("Parallax [mas]")
+		plt.xlabel("parallax [mas]")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
 
@@ -225,7 +227,8 @@ class Amasijo(object):
 if __name__ == "__main__":
 
 	dir_main      =  "/home/javier/Repositories/Amasijo/Data/"
-	file_plot = dir_main + "Plot.pdf"
+	file_plot     = dir_main + "Plot.pdf"
+	file_data     = dir_main + "synthetic.csv"
 	random_seeds  = [1]    # Random state for the synthetic data
 	n_stars       = 100
 
@@ -252,7 +255,7 @@ if __name__ == "__main__":
 					  photometric_args=photometric_args,
 					  seed=seed,)
 
-		ama.generate_cluster(n_stars=n_stars)
+		ama.generate_cluster(file_data,n_stars=n_stars)
 
 		ama.plot_cluster(file_plot=file_plot)
 
