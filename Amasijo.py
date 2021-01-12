@@ -26,6 +26,7 @@ class Amasijo(object):
 					  seed=1234):
 
 		#------ Set Seed -----------------
+		np.random.seed(seed=seed)
 		self.random_state = np.random.RandomState(seed=seed)
 
 		#---------- Arguments --------------------------
@@ -43,29 +44,39 @@ class Amasijo(object):
 	#====================== Generate Astrometric Data ==================================================
 
 	def _generate_phase_space(self,n_stars,astrometric_args):
-		assert len(astrometric_args["loc"]) == len(astrometric_args["scl"]), "loc and scale must have same dimension."
-		assert astrometric_args["family"] in ["Gaussian","EFF","King","GMM"], "{0} family is not implemented".format(family)
+		position_args = astrometric_args["position"]
+		velocity_args = astrometric_args["velocity"]
 
-		#------- Sample the radial distance  ------------------------------
-		if (astrometric_args["family"] == "Gaussian") or (astrometric_args["family"] == "GMM"):
+		#======================= Verification ==============================================================
+		msg_0 = "Error in position arguments: loc and scale must have same dimension."
+		msg_1 = "Error in position arguments: family {0} is not implemented".format(position_args["family"]) 
+
+		assert len(position_args["loc"]) == len(position_args["scl"]), msg_0
+		assert position_args["family"] in ["Gaussian","EFF","King","GMM"], msg_1
+
+		#=============================== Positions ========================================================
+
+		#------- Sample the radial distance  ----------------------------------------------
+		if (position_args["family"] == "Gaussian") or (position_args["family"] == "GMM"):
 			r = st.norm.rvs(size=n_stars)
-		elif astrometric_args["family"] == "EFF":
-			r = eff.rvs(gamma=astrometric_args["gamma"],size=n_stars)
-		elif astrometric_args["family"] == "King":
-			r = king.rvs(rt=astrometric_args["tidal_radius"],size=n_stars)
+		elif position_args["family"] == "EFF":
+			r = eff.rvs(gamma=position_args["gamma"],size=n_stars)
+		elif position_args["family"] == "King":
+			r = king.rvs(rt=position_args["tidal_radius"],size=n_stars)
+		#----------------------------------------------------------------------------------
 
 
 		#------ Samples from the angles -------
 		samples = toCartesian(r,3,random_state=self.random_state).reshape(n_stars,3)
 
-		chol = np.linalg.cholesky(astrometric_args["scl"])
+		chol = np.linalg.cholesky(position_args["scl"])
 		samples = np.dot(samples,chol)
 
-		if astrometric_args["family"] == "GMM":
+		if position_args["family"] == "GMM":
 			sys.exit("Not yet implemented")
-			assert np.sum(astrometric_args["weights"]) == 1.0,"weights must be a simplex"
-			n_cmp = len(astrometric_args["weights"])
-			n_stars_cmp = np.floor(astrometric_args["weights"]*n_stars).astype('int')
+			assert np.sum(position_args["weights"]) == 1.0,"weights must be a simplex"
+			n_cmp = len(position_args["weights"])
+			n_stars_cmp = np.floor(position_args["weights"]*n_stars).astype('int')
 			n_res = n_stars - np.sum(n_stars_cmp)
 			residual = np.ones(n_cmp)
 			residual[n_res:] = 0
@@ -74,12 +85,12 @@ class Amasijo(object):
 
 			init = 0
 			X = np.empty((n_stars,3))
-			for n,l,s in zip(n_stars_cmp,astrometric_args["loc"],astrometric_args["scl"]):
+			for n,l,s in zip(n_stars_cmp,position_args["loc"],position_args["scl"]):
 				X[init:(init+n)] = np.array(l) + np.matmul(r[init:(init+n)],np.array(s))
 				init += n
 
 		else:
-			X = astrometric_args["loc"] + samples
+			X = position_args["loc"] + samples
 		#--------------------------------------------------------
 
 		return X
@@ -187,39 +198,85 @@ class Amasijo(object):
 
 
 	#=========================Plot =====================================================
-	def plot_cluster(self,file_plot):
+	def plot_cluster(self,file_plot,figsize=(10,10),color="blue",markersize=1):
 		print("Plotting ...")
 		pdf = PdfPages(filename=file_plot)
 		n_bins = 100
 
+		#----------------- X Y Z -----------------------------
+		coords = { 2:["X","Z"], 3:["Z","Y"], 4:["X","Y"]}
+
+		fig = plt.figure(figsize=figsize)
+		count = 2
+
+		for i in range(2):
+			for j in range(2):
+				if (i + j) != 0 :
+
+					ax = fig.add_subplot(2, 2, count)
+					#============ Data =========================
+					x = coords[count][0]
+					y = coords[count][1]
+
+					ax.scatter(self.df[x],self.df[y],
+								s=markersize,color=color)
+					ax.set_xlabel(x + " [pc]")
+					ax.set_ylabel(y + " [pc]")
+
+					#----- Avoids crowded ticks --------------
+					ax.locator_params(nbins=4)
+					#-----------------------------------------
+
+					count += 1
+
+
+		ax = fig.add_subplot(2, 2, 1, projection='3d')
+		ax.scatter(self.df["X"], self.df["Y"], self.df["Z"], 
+								s=markersize, color=color)
+		ax.set_xlabel("X [pc]")
+		ax.set_ylabel("Y [pc]")
+		ax.set_zlabel("Z [pc]")
+		ax.view_init(25,-135)
+		#----- Avoids crowded ticks --------------
+		ax.locator_params(nbins=4)
+		#-----------------------------------------
+
+		fig.tight_layout()
+		pdf.savefig(bbox_inches='tight')
+		plt.close()
+
 		plt.figure()
-		plt.scatter(self.df["ra"],self.df["dec"],s=1)
+		plt.scatter(self.df["ra"],self.df["dec"],
+						s=markersize, color=color)
 		plt.ylabel("Dec. [deg]")
 		plt.xlabel("R.A. [deg]")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
 
 		plt.figure()
-		plt.hist(self.df["parallax"],density=False,histtype="step",bins=n_bins,alpha=0.5)
+		plt.hist(self.df["parallax"],density=False,bins=n_bins,
+					histtype="step",color=color)
 		plt.ylabel("Density")
 		plt.xlabel("parallax [mas]")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
 
 		plt.figure()
-		plt.hist(self.df["parallax_error"],density=False,bins=n_bins,log=True)
+		plt.hist(self.df["parallax_error"],density=False,bins=n_bins,
+					log=True,histtype="step",color=color)
 		plt.ylabel("Density")
 		plt.xlabel("parallax_error [mas]")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
 
-		plt.figure(0)
-		plt.scatter(self.df["V_mag"]-self.df["I_mag"],self.df["G_mag"],s=1)
+		plt.figure()
+		plt.scatter(self.df["V_mag"]-self.df["I_mag"],self.df["G_mag"],
+						s=markersize, color=color)
 		plt.ylabel("G [mag]")
 		plt.xlabel("V - I [mag]")
-		plt.ylim(25,3)
+		plt.gca().invert_yaxis()
 		pdf.savefig(bbox_inches='tight')
-		plt.close(0)
+		plt.close()
 
 		pdf.close()
 	#------------------------------------------------------------------------------
@@ -233,14 +290,21 @@ if __name__ == "__main__":
 	n_stars       = 100
 
 	astrometric_args = {
-		"family":"Gaussian",
-		"loc":np.array([50.,50.,50.]),
-		"scl":np.eye(3)*10.0,
-		"loc2":np.array([150.0,0.0,0.0]),
-		"scl2":np.eye(3)*20.0,
-		"fraction":0.5,
-		"gamma": 5.0,
-		"tidal_radius": 5.0
+		"position":{
+			"family":"Gaussian",
+			"loc":np.array([50.,50.,50.]),
+			"scl":np.eye(3)*10.0,
+			"loc2":np.array([150.0,0.0,0.0]),
+			"scl2":np.eye(3)*20.0,
+			"fraction":0.5,
+			"gamma": 5.0,
+			"tidal_radius": 5.0
+			},
+		"velocity":{
+			"family":"Gaussian",
+			"loc":np.array([50.,50.,50.]),
+			"scl":np.eye(3)*10.0
+			}
 	}
 	photometric_args = {
 		"log_age": 8.2,     # Solar metallicity
