@@ -8,10 +8,11 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 from Functions import AngularSeparation,CovarianceParallax
-from distributions import eff,king,toCartesian
+from distributions import mveff,mvking
 
 from pygaia.astrometry.vectorastrometry import cartesian_to_spherical
 from pygaia.errors.astrometric import parallax_uncertainty,total_position_uncertainty
+from pygaia.errors.photometric import g_magnitude_uncertainty,bp_magnitude_uncertainty,rp_magnitude_uncertainty
 
 from isochrones import get_ichrone
 from isochrones.priors import ChabrierPrior
@@ -37,9 +38,13 @@ class Amasijo(object):
 		self.tracks = get_ichrone('mist', tracks=True,bands=photometric_args["bands"])
 
 		#------- Labels -----------------------------------------------------
-		self.labels_true_as = ["X","Y","Z"]
+		self.labels_phase_space = ["X","Y","Z"]
+		self.labels_true_as = ["ra_true","dec_true","parallax_true"]
+		self.labels_true_ph = [band+"_mag" for band in photometric_args["bands"]]
 		self.labels_obs_as  = ["ra","dec","parallax"]
 		self.labels_unc_as  = ["ra_error","dec_error","parallax_error"]
+		self.labels_obs_ph  = ["g","bp","rp"]
+		self.labels_unc_ph  = ["g_error","bp_error","rp_error"]
 
 	#====================== Generate Astrometric Data ==================================================
 
@@ -55,25 +60,19 @@ class Amasijo(object):
 		assert position_args["family"] in ["Gaussian","EFF","King","GMM"], msg_1
 
 		#=============================== Positions ========================================================
+		if position_args["family"] == "Gaussian":
+			XYZ = st.multivariate_normal.rvs(mean=position_args["loc"],cov=position_args["scl"],
+												size=n_stars)
 
-		#------- Sample the radial distance  ----------------------------------------------
-		if (position_args["family"] == "Gaussian") or (position_args["family"] == "GMM"):
-			r = st.norm.rvs(size=n_stars)
 		elif position_args["family"] == "EFF":
-			r = eff.rvs(gamma=position_args["gamma"],size=n_stars)
+			XYZ = mveff.rvs(loc=position_args["loc"],scale=position_args["scl"],
+							gamma=position_args["gamma"],size=n_stars)
+
 		elif position_args["family"] == "King":
-			r = king.rvs(rt=position_args["tidal_radius"],size=n_stars)
-		#----------------------------------------------------------------------------------
+			XYZ = mvking.rvs(loc=position_args["loc"],scale=position_args["scl"],
+							rt=position_args["tidal_radius"],size=n_stars)
 
-
-		#------ Samples from the angles -------
-		samples = toCartesian(r,3,random_state=self.random_state).reshape(n_stars,3)
-
-		chol = np.linalg.cholesky(position_args["scl"])
-		samples = np.dot(samples,chol)
-
-		if position_args["family"] == "GMM":
-			sys.exit("Not yet implemented")
+		elif position_args["family"] == "GMM":
 			assert np.sum(position_args["weights"]) == 1.0,"weights must be a simplex"
 			n_cmp = len(position_args["weights"])
 			n_stars_cmp = np.floor(position_args["weights"]*n_stars).astype('int')
@@ -83,25 +82,25 @@ class Amasijo(object):
 			n_stars_cmp += residual
 			assert np.sum(n_stars_cmp) == n_stars, "Check division of sources in GMM!"
 
-			init = 0
-			X = np.empty((n_stars,3))
-			for n,l,s in zip(n_stars_cmp,position_args["loc"],position_args["scl"]):
-				X[init:(init+n)] = np.array(l) + np.matmul(r[init:(init+n)],np.array(s))
-				init += n
+			l = []
+			for n,loc,scl in zip(n_stars_cmp,position_args["loc"],position_args["scl"]):
+				l.append(st.multivariate_normal.rvs(mean=loc,cov=scl,size=n))
+
+			XYZ = np.concatenate(l,axis=0)
 
 		else:
-			X = position_args["loc"] + samples
-		#--------------------------------------------------------
+			sys.exit("Error: incorrect family argument")
+		#===============================================================================================
 
-		return X
+		return XYZ
 
-	def _generate_true_values(self,X,photometric_args,parallax_spatial_correlations="Vasiliev+2019"):
-		N,D = X.shape
+	def _generate_true_values(self,XYZ,photometric_args,parallax_spatial_correlations="Vasiliev+2019"):
+		N,D = XYZ.shape
 
 		assert D == 3, "Error, this code works only with ra,dec and parallax"
 		
 		#------- Sky coordinates -----------
-		r,ra,dec = cartesian_to_spherical(X[:,0],X[:,1],X[:,2])
+		r,ra,dec = cartesian_to_spherical(XYZ[:,0],XYZ[:,1],XYZ[:,2])
 
 		#----- Transform ----------------------
 		plx  = 1000.0/r             # In mas
@@ -109,8 +108,11 @@ class Amasijo(object):
 		dec  = np.rad2deg(dec)      # In degrees
 		true = np.column_stack((ra,dec,plx))
 
+		#-------- Data Frame --------------------------------------
+		df_as = pd.DataFrame(data=true,columns=self.labels_true_as)
+
 		#------------ Total covariance of correlation -------------
-		cov_corr = np.zeros((D*N,D*N))
+		cov_as = np.zeros((D*N,D*N))
 
 		#------ Parallax spatial correlations -------------------
 		if parallax_spatial_correlations is not None:
@@ -124,54 +126,142 @@ class Amasijo(object):
 
 			#----- Fill parallax part ---------------
 			idx = np.arange(2,D*N,step=D)
-			cov_corr[np.ix_(idx,idx)] = cov_corr_plx
+			cov_as[np.ix_(idx,idx)] = cov_corr_plx
+		#--------------------------------------------------------
 
-		#----------------- Photometric data ---------------------------------------
+		#=============== Photometric data ===================================
+		#------- Sample from Chabrier prior-------
+		masses  = ChabrierPrior().sample(3*N)
 
-		#------- Sample from Chbarier prior-------
-		masses  = ChabrierPrior().sample(10*N)
-
-		#------- Only stars less massive than limit ------
+		#------- Only stars less massive than mass_limit ---------------------
 		masses  = masses[np.where(masses < photometric_args["mass_limit"])[0]]
-		masses  = np.random.choice(masses,N)
-		df = self.tracks.generate(masses, photometric_args["log_age"], photometric_args["metallicity"], 
-									 distance=r, 
-									 AV=photometric_args["Av"])
-		df.dropna(inplace=True)
 
-		return true,df,cov_corr
+		#---------- Indices -----------
+		idx = np.arange(start=0,stop=N)
+
+		#------- Obtains photometry --------------------------------
+		df_ph = self.tracks.generate(masses[idx], 
+									photometric_args["log_age"], 
+									photometric_args["metallicity"], 
+									distance=r, 
+									AV=photometric_args["Av"])
+		#-----------------------------------------------------------
+
+		#------- Ensure that sources are within Gaia limit ---------
+		while any(df_ph["G_mag"] > 21.0):
+			#-------- Find indices and index -----
+			idx = np.where(df_ph["G_mag"] > 21.0)[0]
+			index = df_ph.iloc[idx].index.values
+			#-------------------------------------
+			
+			#----------- Choose new masses -------------
+			idy = np.random.choice(np.arange(start=N,
+									stop=len(masses)),
+									size=len(idx))
+			#-------------------------------------------
+
+			#---------- Generates photometry -----------------------
+			tmp = self.tracks.generate(masses[idy], 
+									photometric_args["log_age"], 
+									photometric_args["metallicity"], 
+									distance=r[idx], 
+									AV=photometric_args["Av"])
+			tmp.set_index(index,inplace=True)
+			#-------------------------------------------------------
+
+			print("Replacing {0} sources beyond Gaia limit".format(len(idx)))
+			#------------------------------------------------
+			df_ph.update(tmp)
+		#-------------------------------------------------------------
+
+		#- Drop missing values ----
+		df_ph.dropna(subset=["G_mag"],inplace=True)
+
+		#---- Join true values -------
+		df_true = df_as.join(df_ph)
+
+		return df_true,cov_as
 	#======================================================================================
 
-	def _assign_uncertainty(self,true_as,true_ph,cov_corr,release='dr3'):
-		N,D = true_as.shape
+	def _generate_observed_values(self,true,cov_as,release='dr3'):
+		N = len(true)
 
-		#-------Computes ra,dec, and parallax uncertainty ------------------------
-		parallax_error = 1e-3*parallax_uncertainty(true_ph["G_mag"], release=release)
-		position_error = 1e-3*total_position_uncertainty(true_ph["G_mag"], release=release)
+		#---- Astrometric and photometric values ------
+		true_as = true.loc[:,self.labels_true_as]
+		true_ph = true.loc[:,["G_mag","BP_mag","RP_mag"]]
+		#-----------------------------------------------
 
-		#-------------- Stack  ------------------------------------------------
-		unc_as = np.column_stack((position_error,position_error,parallax_error))
+		#------- Uncertainties -------------------------------------
+		plx_unc = 1e-3*parallax_uncertainty(true_ph["G_mag"],
+								release=release)
 
-		#------ Covariance of observational uncertainties --------
-		cov_obs = np.diag(unc_as.flatten()**2)
+		pos_unc = 1e-3*total_position_uncertainty(true_ph["G_mag"], 
+								release=release)
 
-		#------ Total covariance is the convolution of the previous ones
-		cov =  cov_obs + cov_corr 
+		g_unc   = g_magnitude_uncertainty(true_ph["G_mag"])
 
-		#------- Correlated observations -----------------------------------------
-		obs_as = st.multivariate_normal.rvs(mean=true_as.flatten(),cov=cov,size=1).reshape((N,D))
-		#------------------------------------------------------------------------
+		bp_unc  = bp_magnitude_uncertainty(true_ph["G_mag"],
+								true["V_mag"] - true["I_mag"])
 
-		#--------- Data Frames -----------------------------------
-		df_obs_as = pd.DataFrame(data=obs_as,columns=self.labels_obs_as)
-		df_unc_as = pd.DataFrame(data=unc_as,columns=self.labels_unc_as)
+		rp_unc  = rp_magnitude_uncertainty(true_ph["G_mag"], 
+								true["V_mag"] - true["I_mag"])
+		#------------------------------------------------------------
 
-		df_true = pd.DataFrame(data=true_as,columns=self.labels_true_as).join(true_ph)
+		#------ Stack values ------------------------------
+		unc_as = np.column_stack((pos_unc,pos_unc,plx_unc))
+		unc_ph = np.column_stack((g_unc,bp_unc,rp_unc))
+		#---------------------------------------------------
 
-		#-------- Join data frames -----------------------------
-		df = df_true.join(df_obs_as).join(df_unc_as)
+		#======= Astrometry ======================
+		#------ Covariance ---------------
+		u_as = unc_as.copy()
+		u_as[:,0] /= 3.6e6
+		u_as[:,1] /= 3.6e6
+		cov = np.diag(u_as.flatten()**2)
+		# Plus correlations
+		cov +=  cov_as 
+		#----------------------------------
+
+		#------- Observed values ------------
+		obs_as = st.multivariate_normal.rvs(
+				mean=true_as.to_numpy().flatten(),
+				cov=cov,
+				size=1).reshape((N,3))
+		#-------------------------------------
+
+		#--------- Data Frames ------------------
+		df_obs_as = pd.DataFrame(data=obs_as,
+					columns=self.labels_obs_as)
+		df_unc_as = pd.DataFrame(data=unc_as,
+					columns=self.labels_unc_as)
+
+		df_as = df_obs_as.join(df_unc_as)
+		#-----------------------------------------
+		#===========================================
+
+		#======= Photometry ======================
+		#------ Covariance ---------------
+		cov = np.diag(unc_ph.flatten()**2)
+		#----------------------------------
+
+		#------- Observed values ------------
+		obs_ph = st.multivariate_normal.rvs(
+				mean=true_ph.to_numpy().flatten(),
+				cov=cov,
+				size=1).reshape((N,3))
+		#-------------------------------------
+
+		#--------- Data Frames ------------------
+		df_obs_ph = pd.DataFrame(data=obs_ph,
+					columns=self.labels_obs_ph)
+		df_unc_ph = pd.DataFrame(data=unc_ph,
+					columns=self.labels_unc_ph)
+
+		df_ph = df_obs_ph.join(df_unc_ph)
+		#-----------------------------------------
+		#===========================================
 		
-		return df
+		return df_as.join(df_ph)
 
 	#================= Generate cluster ==========================
 	def generate_cluster(self,file,n_stars=100,
@@ -182,26 +272,34 @@ class Amasijo(object):
 		print("Generating synthetic data ...")
 
 		#---------- Phase space coordinates --------------------------------------------------
-		X = self._generate_phase_space(n_stars=n_stars,
+		XYZ = self._generate_phase_space(n_stars=n_stars,
 							astrometric_args=self.astrometric_args)
+		df_xyz = pd.DataFrame(data=XYZ,columns=self.labels_phase_space)
 
 		#--------------------- True values -----------------------------------------------------
-		true,df_ph,cov_corr = self._generate_true_values(X,
+		df_true,cov_as = self._generate_true_values(XYZ,
 									photometric_args=self.photometric_args,
 									parallax_spatial_correlations=parallax_spatial_correlations)
 
-		#------------- Adds uncertainty ---------------------------------------
-		self.df = self._assign_uncertainty(true,df_ph,cov_corr,release=release)
+		#------------- Observed values ---------------------------------------
+		df_obs = self._generate_observed_values(df_true,cov_as,release=release)
+
+		#-------- Join data frames -----------------------------
+		self.df = df_xyz.join(df_true).join(df_obs)
 
 		#----------- Save data frame ----------------------------
 		self.df.to_csv(path_or_buf=file,index_label=index_label)
 
 
 	#=========================Plot =====================================================
-	def plot_cluster(self,file_plot,figsize=(10,10),color="blue",markersize=1):
+	def plot_cluster(self,file_plot,figsize=(10,10),n_nins=50,
+			cases={
+					"true":    {"color":"red", "ms":5,  "label":"True values"},
+					"observed":{"color":"blue","ms":10, "label":"Observed values"}
+				}
+				):
 		print("Plotting ...")
 		pdf = PdfPages(filename=file_plot)
-		n_bins = 100
 
 		#----------------- X Y Z -----------------------------
 		coords = { 2:["X","Z"], 3:["Z","Y"], 4:["X","Y"]}
@@ -219,7 +317,9 @@ class Amasijo(object):
 					y = coords[count][1]
 
 					ax.scatter(self.df[x],self.df[y],
-								s=markersize,color=color)
+								s=cases["true"]["ms"],
+								color=cases["true"]["color"],
+								label=cases["true"]["label"])
 					ax.set_xlabel(x + " [pc]")
 					ax.set_ylabel(y + " [pc]")
 
@@ -232,7 +332,9 @@ class Amasijo(object):
 
 		ax = fig.add_subplot(2, 2, 1, projection='3d')
 		ax.scatter(self.df["X"], self.df["Y"], self.df["Z"], 
-								s=markersize, color=color)
+								s=cases["true"]["ms"], 
+								color=cases["true"]["color"],
+								label=cases["true"]["label"])
 		ax.set_xlabel("X [pc]")
 		ax.set_ylabel("Y [pc]")
 		ax.set_zlabel("Z [pc]")
@@ -245,36 +347,109 @@ class Amasijo(object):
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
 
-		plt.figure()
+		plt.figure(figsize=figsize)
 		plt.scatter(self.df["ra"],self.df["dec"],
-						s=markersize, color=color)
-		plt.ylabel("Dec. [deg]")
-		plt.xlabel("R.A. [deg]")
+						s=cases["observed"]["ms"], 
+						color=cases["observed"]["color"],
+						label=cases["observed"]["label"])
+		plt.scatter(self.df["ra_true"],self.df["dec_true"],
+						s=cases["true"]["ms"], 
+						color=cases["true"]["color"],
+						label=cases["true"]["label"])
+		plt.ylabel("ra [deg]")
+		plt.xlabel("dec [deg]")
+		plt.legend(title="Cases",loc="best")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
 
-		plt.figure()
-		plt.hist(self.df["parallax"],density=False,bins=n_bins,
-					histtype="step",color=color)
+		plt.figure(figsize=figsize)
+		plt.hist(self.df["parallax"],density=False,
+					bins=n_bins,histtype="step",
+					color=cases["observed"]["color"],
+					label=cases["observed"]["label"])
+		plt.hist(self.df["parallax_true"],density=False,
+					bins=n_bins,histtype="step",
+					color=cases["true"]["color"],
+					label=cases["true"]["label"])
 		plt.ylabel("Density")
 		plt.xlabel("parallax [mas]")
+		plt.legend(title="Cases",loc="best")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
 
-		plt.figure()
-		plt.hist(self.df["parallax_error"],density=False,bins=n_bins,
-					log=True,histtype="step",color=color)
+		plt.figure(figsize=figsize)
+		plt.hist(self.df["ra_error"],density=True,bins=n_bins,
+					log=True,histtype="step",color=cases["observed"]["color"])
+		plt.ylabel("Density")
+		plt.xlabel("ra_error [mas]")
+		pdf.savefig(bbox_inches='tight')
+		plt.close()
+
+		plt.figure(figsize=figsize)
+		plt.hist(self.df["parallax_error"],density=True,bins=n_bins,
+					log=True,histtype="step",color=cases["observed"]["color"])
 		plt.ylabel("Density")
 		plt.xlabel("parallax_error [mas]")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
 
-		plt.figure()
-		plt.scatter(self.df["V_mag"]-self.df["I_mag"],self.df["G_mag"],
-						s=markersize, color=color)
+		plt.figure(figsize=figsize)
+		plt.hist(self.df["g_error"],density=True,bins=n_bins,
+					log=True,histtype="step",color=cases["observed"]["color"])
+		plt.ylabel("Density")
+		plt.xlabel("g_error [mag]")
+		pdf.savefig(bbox_inches='tight')
+		plt.close()
+
+		plt.figure(figsize=figsize)
+		plt.hist(self.df["bp_error"],density=True,bins=n_bins,
+					log=True,histtype="step",color=cases["observed"]["color"])
+		plt.ylabel("Density")
+		plt.xlabel("bp_error [mag]")
+		pdf.savefig(bbox_inches='tight')
+		plt.close()
+
+		plt.figure(figsize=figsize)
+		plt.hist(self.df["rp_error"],density=True,bins=n_bins,
+					log=True,histtype="step",color=cases["observed"]["color"])
+		plt.ylabel("Density")
+		plt.xlabel("rp_error [mag]")
+		pdf.savefig(bbox_inches='tight')
+		plt.close()
+
+		plt.figure(figsize=figsize)
+		plt.scatter(self.df["bp"]-self.df["rp"],
+					self.df["g"],
+					s=cases["observed"]["ms"],
+					color=cases["observed"]["color"],
+					label=cases["observed"]["label"])
+		plt.scatter(self.df["BP_mag"]-self.df["RP_mag"],
+					self.df["G_mag"],
+					s=cases["true"]["ms"],
+					color=cases["true"]["color"],
+					label=cases["true"]["label"])
 		plt.ylabel("G [mag]")
-		plt.xlabel("V - I [mag]")
+		plt.xlabel("BP - RP [mag]")
 		plt.gca().invert_yaxis()
+		plt.legend(title="Cases",loc="best")
+		pdf.savefig(bbox_inches='tight')
+		plt.close()
+
+		plt.figure(figsize=figsize)
+		plt.scatter(self.df["g"]-self.df["rp"],
+					self.df["g"],
+					s=cases["observed"]["ms"],
+					color=cases["observed"]["color"],
+					label=cases["observed"]["label"])
+		plt.scatter(self.df["G_mag"]-self.df["RP_mag"],
+					self.df["G_mag"],
+					s=cases["true"]["ms"],
+					color=cases["true"]["color"],
+					label=cases["true"]["label"])
+		plt.ylabel("G [mag]")
+		plt.xlabel("G - RP [mag]")
+		plt.gca().invert_yaxis()
+		plt.legend(title="Cases",loc="best")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
 
@@ -287,23 +462,18 @@ if __name__ == "__main__":
 	file_plot     = dir_main + "Plot.pdf"
 	file_data     = dir_main + "synthetic.csv"
 	random_seeds  = [1]    # Random state for the synthetic data
-	n_stars       = 100
+	n_stars       = 1000
 
 	astrometric_args = {
 		"position":{
 			"family":"Gaussian",
-			"loc":np.array([50.,50.,50.]),
-			"scl":np.eye(3)*10.0,
-			"loc2":np.array([150.0,0.0,0.0]),
-			"scl2":np.eye(3)*20.0,
-			"fraction":0.5,
-			"gamma": 5.0,
-			"tidal_radius": 5.0
+				"loc":np.array([500.,500.,500.]),
+				"scl":np.eye(3)*10.0
 			},
 		"velocity":{
 			"family":"Gaussian",
-			"loc":np.array([50.,50.,50.]),
-			"scl":np.eye(3)*10.0
+				"loc":np.array([0.,0.,0.]),
+				"scl":np.eye(3)*2.0
 			}
 	}
 	photometric_args = {
@@ -311,7 +481,7 @@ if __name__ == "__main__":
 		"metallicity":0.02, # Typical value of Bossini+2019
 		"Av": 0.0,          # No extinction
 		"mass_limit":4.0,   # Avoids NaNs in photometry
-		"bands":"VIG"
+		"bands":["V","I","G","BP","RP"]
 	}
 
 	for seed in random_seeds:

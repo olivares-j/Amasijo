@@ -345,12 +345,12 @@ class multivariate_eff_gen(multi_rv_generic):
 		# rc = np.exp(log_pdet)
 
 		#------ Take samples from the distance -------------
-		# if dim == 1 :
-		rho = eff.rvs(gamma=gamma,size=size)
-		# elif dim == 3:
-		# 	rho = self._rvs_r3d(rc=1.0, gamma=gamma, size=size)
-		# else:
-		# 	sys.exit("Dimension {0} not implemented".format(dim))
+		if dim == 1 :
+			rho = eff.rvs(gamma=gamma,size=size)
+		elif dim == 3:
+			rho = self._rvs_r3d(rc=1.0, gamma=gamma, size=size)
+		else:
+			sys.exit("Dimension {0} not implemented".format(dim))
 
 		#------ Samples from the angles -------
 		samples = toCartesian(rho,dim,random_state=rng).reshape(size,dim)
