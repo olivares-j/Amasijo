@@ -77,7 +77,7 @@ class Amasijo(object):
 			n_cmp = len(position_args["weights"])
 			n_stars_cmp = np.floor(position_args["weights"]*n_stars).astype('int')
 			n_res = n_stars - np.sum(n_stars_cmp)
-			residual = np.ones(n_cmp)
+			residual = np.ones(n_cmp).astype('int')
 			residual[n_res:] = 0
 			n_stars_cmp += residual
 			assert np.sum(n_stars_cmp) == n_stars, "Check division of sources in GMM!"
@@ -292,7 +292,7 @@ class Amasijo(object):
 
 
 	#=========================Plot =====================================================
-	def plot_cluster(self,file_plot,figsize=(10,10),n_nins=50,
+	def plot_cluster(self,file_plot,figsize=(10,10),n_bins=50,
 			cases={
 					"true":    {"color":"red", "ms":5,  "label":"True values"},
 					"observed":{"color":"blue","ms":10, "label":"Observed values"}
@@ -310,9 +310,7 @@ class Amasijo(object):
 		for i in range(2):
 			for j in range(2):
 				if (i + j) != 0 :
-
 					ax = fig.add_subplot(2, 2, count)
-					#============ Data =========================
 					x = coords[count][0]
 					y = coords[count][1]
 
@@ -322,11 +320,7 @@ class Amasijo(object):
 								label=cases["true"]["label"])
 					ax.set_xlabel(x + " [pc]")
 					ax.set_ylabel(y + " [pc]")
-
-					#----- Avoids crowded ticks --------------
 					ax.locator_params(nbins=4)
-					#-----------------------------------------
-
 					count += 1
 
 
@@ -338,15 +332,17 @@ class Amasijo(object):
 		ax.set_xlabel("X [pc]")
 		ax.set_ylabel("Y [pc]")
 		ax.set_zlabel("Z [pc]")
+		# View point
 		ax.view_init(25,-135)
-		#----- Avoids crowded ticks --------------
+		# Avoids crowded ticks 
 		ax.locator_params(nbins=4)
-		#-----------------------------------------
 
 		fig.tight_layout()
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
+		#-----------------------------------------------------
 
+		#---------- Sky coordinates -----------------------
 		plt.figure(figsize=figsize)
 		plt.scatter(self.df["ra"],self.df["dec"],
 						s=cases["observed"]["ms"], 
@@ -361,7 +357,9 @@ class Amasijo(object):
 		plt.legend(title="Cases",loc="best")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
+		#--------------------------------------------------
 
+		#------------ Parallax ----------------------------
 		plt.figure(figsize=figsize)
 		plt.hist(self.df["parallax"],density=False,
 					bins=n_bins,histtype="step",
@@ -376,47 +374,9 @@ class Amasijo(object):
 		plt.legend(title="Cases",loc="best")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
+		#--------------------------------------------------
 
-		plt.figure(figsize=figsize)
-		plt.hist(self.df["ra_error"],density=True,bins=n_bins,
-					log=True,histtype="step",color=cases["observed"]["color"])
-		plt.ylabel("Density")
-		plt.xlabel("ra_error [mas]")
-		pdf.savefig(bbox_inches='tight')
-		plt.close()
-
-		plt.figure(figsize=figsize)
-		plt.hist(self.df["parallax_error"],density=True,bins=n_bins,
-					log=True,histtype="step",color=cases["observed"]["color"])
-		plt.ylabel("Density")
-		plt.xlabel("parallax_error [mas]")
-		pdf.savefig(bbox_inches='tight')
-		plt.close()
-
-		plt.figure(figsize=figsize)
-		plt.hist(self.df["g_error"],density=True,bins=n_bins,
-					log=True,histtype="step",color=cases["observed"]["color"])
-		plt.ylabel("Density")
-		plt.xlabel("g_error [mag]")
-		pdf.savefig(bbox_inches='tight')
-		plt.close()
-
-		plt.figure(figsize=figsize)
-		plt.hist(self.df["bp_error"],density=True,bins=n_bins,
-					log=True,histtype="step",color=cases["observed"]["color"])
-		plt.ylabel("Density")
-		plt.xlabel("bp_error [mag]")
-		pdf.savefig(bbox_inches='tight')
-		plt.close()
-
-		plt.figure(figsize=figsize)
-		plt.hist(self.df["rp_error"],density=True,bins=n_bins,
-					log=True,histtype="step",color=cases["observed"]["color"])
-		plt.ylabel("Density")
-		plt.xlabel("rp_error [mag]")
-		pdf.savefig(bbox_inches='tight')
-		plt.close()
-
+		#----------- CMDs -----------------------------------
 		plt.figure(figsize=figsize)
 		plt.scatter(self.df["bp"]-self.df["rp"],
 					self.df["g"],
@@ -452,6 +412,25 @@ class Amasijo(object):
 		plt.legend(title="Cases",loc="best")
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
+		#-------------------------------------------------
+
+		#---------- Uncertainties ----------------------
+		features = ["ra_error","parallax_error","g_error",
+						"bp_error","rp_error"]
+		labels = [f+u for f,u in zip(features,[" [mas]",
+					" [mas]"," [mag]"," [mag]"," [mag]"])]
+
+		fig, axs = plt.subplots(nrows=5, ncols=1,figsize=figsize,
+					gridspec_kw={"hspace":0.4})
+		for ax,feature,label in zip(axs,features,labels):
+			ax.hist(self.df[feature],density=True,
+					bins=n_bins,log=True,histtype="step",
+					color=cases["observed"]["color"])
+			ax.set_ylabel("Density")
+			ax.set_xlabel(label)
+		pdf.savefig(bbox_inches='tight')
+		plt.close()
+		#--------------------------------------------------------
 
 		pdf.close()
 	#------------------------------------------------------------------------------
@@ -466,9 +445,22 @@ if __name__ == "__main__":
 
 	astrometric_args = {
 		"position":{
-			"family":"Gaussian",
-				"loc":np.array([500.,500.,500.]),
-				"scl":np.eye(3)*10.0
+			# "family":"Gaussian",
+			# 	"loc":np.array([500.,500.,500.]),
+			# 	"scl":np.eye(3)*10.0
+			# "family":"EFF",
+			# 	"loc":np.array([500.,500.,500.]),
+			# 	"scl":np.eye(3)*10.0,
+			# 	"gamma":3.5
+			# "family":"King",
+			# 	"loc":np.array([500.,500.,500.]),
+			# 	"scl":np.eye(3)*10.0,
+			# 	"tidal_radius":5.
+			"family":"GMM",
+				"weights":np.array([0.4,0.6]),
+				"loc":[np.array([500.,500.,500.]),
+					   np.array([550.,550.,550.])],
+				"scl":[np.eye(3)*10.0,np.eye(3)*20.0]
 			},
 		"velocity":{
 			"family":"Gaussian",
