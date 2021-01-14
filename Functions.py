@@ -19,7 +19,7 @@ def AngularSeparation(a):
 
 	return A
 
-def CovariancePM(a,case):
+def covariance_proper_motion(a,case):
 	'''
 	Covariance matrix of the proper motions.
 	microarcsec^2 -> 1e-6 mas^2
@@ -50,7 +50,7 @@ def CovariancePM(a,case):
 
 	return result
 
-def CovarianceParallax(a,case):
+def covariance_parallax(a,case):
 	'''
 	Covariance matrix of the parallax
 	microarcsec^2 -> 1e-6 mas^2
@@ -92,13 +92,13 @@ if __name__ == "__main__":
 
 	theta = np.linspace(0,6,1000)
 
-	X_l   = CovariancePM(theta,case="Lindegren+2018")
-	X_v   = CovariancePM(theta,case="Vasiliev+2019")
-	X_e   = CovariancePM(theta,case="Lindegren+2020")
+	X_l   = covariance_proper_motion(theta,case="Lindegren+2018")
+	X_v   = covariance_proper_motion(theta,case="Vasiliev+2019")
+	X_e   = covariance_proper_motion(theta,case="Lindegren+2020")
 
-	Y_l   = CovarianceParallax(theta,case="Lindegren+2018")
-	Y_v   = CovarianceParallax(theta,case="Vasiliev+2019")
-	Y_e   = CovarianceParallax(theta,case="Lindegren+2020")
+	Y_l   = covariance_parallax(theta,case="Lindegren+2018")
+	Y_v   = covariance_parallax(theta,case="Vasiliev+2019")
+	Y_e   = covariance_parallax(theta,case="Lindegren+2020")
 
 	pdf = PdfPages(filename=file_plot)
 	plt.figure(0)
