@@ -24,8 +24,9 @@ class Amasijo(object):
 	"""This class intends to construct synthetic clusters with simple 
 		astrometric distributions and photometry from stellar models"""
 	def __init__(self,astrometric_args,
-					  photometric_args, 
-					  seed=1234):
+					photometric_args,
+					mcluster_file=None,
+					seed=1234):
 
 		#------ Set Seed -----------------
 		np.random.seed(seed=seed)
@@ -34,11 +35,23 @@ class Amasijo(object):
 		#---------- Arguments --------------------------
 		self.astrometric_args = astrometric_args
 		self.photometric_args = photometric_args
+		self.mcluster_file    = mcluster_file
+		#---------------------------------------------
 
-		#--------------- Tracks -----------------------------------
-		self.tracks = get_ichrone('mist', tracks=True,bands=photometric_args["bands"])
+		#--------------- Tracks ----------------------------
+		self.tracks = get_ichrone('mist', tracks=True,
+						bands=photometric_args["bands"])
+		#---------------------------------------------------
 
-		#------- Labels -----------------------------------------------------
+		#------- MCluster or not --------------------------
+		if self.mcluster_file is not None:
+			self.mcluster = True
+			print("Phase-space coordinates will be read from the MCluster file")
+			print("Therefore, the astrometric parameters will be ignored!")
+		else:
+			self.mcluster = False
+
+		#------- Labels ----------------------------------------------------------------------------------
 		self.labels_phase_space = ["X","Y","Z","U","V","W"]
 		self.labels_true_as = ["ra_true","dec_true","parallax_true",
 								"pmra_true","pmdec_true","radial_velocity_true"]
@@ -46,9 +59,14 @@ class Amasijo(object):
 		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","radial_velocity"]
 		self.labels_unc_as  = ["ra_error","dec_error","parallax_error",
 								"pmra_error","pmdec_error","radial_velocity_error"]
+		self.labels_cor_as  = ["ra_dec_corr","ra_parallax_corr","ra_pmra_corr","ra_pmdec_corr",
+							   "dec_parallax_corr","dec_pmra_corr","dec_pmdec_corr",
+							   "parallax_pmra_corr","parallax_pmdec_corr",
+							   "pmra_pmdec_corr"]
 		self.labels_obs_ph  = ["g","bp","rp"]
 		self.labels_unc_ph  = ["g_error","bp_error","rp_error"]
 		self.labels_rvl     = ["radial_velocity","radial_velocity_error"]
+		#--------------------------------------------------------------------------------------------
 
 	#====================== Generate Astrometric Data ==================================================
 
@@ -128,13 +146,7 @@ class Amasijo(object):
 
 		return XYZUVW
 
-	def _generate_true_values(self,n_stars):
-
-		#================= Astrometric data =================================
-		#---------- Phase space coordinates --------------
-		X = self._generate_phase_space(n_stars=n_stars)
-		#------------------------------------------------
-		
+	def _generate_true_astrometry(self,X):
 		#------- Astrometry & Radial velocity --------------------
 		ra,dec,plx,mua,mud,rvel = phase_space_to_astrometry(
 						X[:,0],X[:,1],X[:,2],X[:,3],X[:,4],X[:,5])
@@ -147,71 +159,31 @@ class Amasijo(object):
 		true = np.column_stack((ra,dec,plx,mua,mud,rvel))
 
 		#-------- Data Frames ---------------------------
-		df_as = pd.DataFrame(data=true,
-						columns=self.labels_true_as)
+		df_as = pd.DataFrame(data=true,columns=self.labels_true_as)
 
-		df_ps = pd.DataFrame(data=X,
-						columns=self.labels_phase_space)
-		#------------------------------------------------
-		#====================================================================
+		return df_as,r
 
-		#=============== Photometric data ===================================
-		#------- Sample from Chabrier prior-------
-		masses  = ChabrierPrior().sample(3*n_stars)
-
-		#------- Only stars less massive than mass_limit ---------------------
-		masses  = masses[np.where(masses < photometric_args["mass_limit"])[0]]
-
-		#---------- Indices -----------
-		idx = np.arange(start=0,stop=n_stars)
-
+	def _generate_true_photometry(self,masses,distances):
 		#------- Obtains photometry --------------------------------
-		df_ph = self.tracks.generate(masses[idx], 
+		df_ph = self.tracks.generate(masses, 
 									photometric_args["log_age"], 
 									photometric_args["metallicity"], 
-									distance=r, 
+									distance=distances, 
 									AV=photometric_args["Av"])
 		#-----------------------------------------------------------
 
-		#------- Ensure that sources are within Gaia limit ---------
-		while any(df_ph["G_mag"] > 21.0):
-			#-------- Find indices and index -----
-			idx = np.where(df_ph["G_mag"] > 21.0)[0]
-			index = df_ph.iloc[idx].index.values
-			#-------------------------------------
-			
-			#----------- Choose new masses -------------
-			idy = np.random.choice(np.arange(start=n_stars,
-									stop=len(masses)),
-									size=len(idx))
-			#-------------------------------------------
+		#----------- Gaia limit ----------------------------------
+		df_ph.drop(df_ph[df_ph["G_mag"] > 21].index, inplace=True)
 
-			#---------- Generates photometry -----------------------
-			tmp = self.tracks.generate(masses[idy], 
-									photometric_args["log_age"], 
-									photometric_args["metallicity"], 
-									distance=r[idx], 
-									AV=photometric_args["Av"])
-			tmp.set_index(index,inplace=True)
-			#-------------------------------------------------------
-
-			#print("Replacing {0} sources beyond Gaia limit".format(len(idx)))
-			#------------------------------------------------
-			df_ph.update(tmp)
-		#-------------------------------------------------------------
-
-		#- Drop missing values --------------------
+		#--------- Drop missing values --------------------
 		df_ph.dropna(subset=["G_mag"],inplace=True)
 
-		#---- Join true values -------
-		df_true = df_as.join(df_ph)
-
-		return df_true,df_ps
+		return df_ph
 	#======================================================================================
 
 	def _generate_observed_values(self,true,
 				release='dr3',
-				angular_correlations="Vasiliev+2019",
+				angular_correlations="Lindegren+2020",
 				radial_velocity_gmag_limits=[4.0,13.0]):
 		N = len(true)
 
@@ -315,6 +287,13 @@ class Amasijo(object):
 
 		df_as = df_obs_as.join(df_unc_as)
 		#-----------------------------------------
+
+		#-------- Correlations ------------------
+		df_cor_as = pd.DataFrame(data=np.zeros(
+					(N,len(self.labels_cor_as))),
+					columns=self.labels_cor_as)
+		df_as = df_as.join(df_cor_as)
+		#----------------------------------------
 		#===========================================================
 
 		#======= Photometry ======================
@@ -347,18 +326,91 @@ class Amasijo(object):
 		mask |= df_obs['g'] > radial_velocity_gmag_limits[1]
 		df_obs.loc[mask,self.labels_rvl] = np.nan
 		#------------------------------------------------------
+
+		#------- Set index -------
+		df_obs.set_index(true.index,inplace=True)
 		
 		return df_obs
+
+	def read_mcluster(self,file):
+		''' Reads mcluster code input files '''
+		position_args = self.astrometric_args["position"]
+		velocity_args = self.astrometric_args["velocity"]
+
+		mc = pd.read_csv(file,sep="\t",header=None,skiprows=1,
+				names=sum([["Mass"],self.labels_phase_space],[]))
+		masses = mc["Mass"].to_numpy()
+		X = mc[self.labels_phase_space].to_numpy()
+
+		#-------- Shift positions and velocities ---
+		X[:,:3] += np.array(position_args["loc"])
+		X[:,3:] += np.array(velocity_args["loc"])
+		#-------------------------------------------
+
+		return masses,X
 
 	#================= Generate cluster ==========================
 	def generate_cluster(self,file,n_stars=100,
 						angular_correlations="Vasiliev+2019",
 						index_label="source_id",
-						release='dr3'):
+						release='dr3',
+						m_factor=2):
 
-		#--------- True values -----------------------------------------------------
-		print("Generating true values ...")
-		df_true,df_ps = self._generate_true_values(n_stars)
+		if self.mcluster:
+			#--------------- Read mcluster file ----------------
+			print("Reading MCluster phase-space values ...")
+			masses,X = self.read_mcluster(file=mcluster_file)
+			m_stars = len(masses)
+			msg_error = "The number of sources in" + \
+						"mcluster_file is smaller than n_stars"
+			assert m_stars >= n_stars, msg_error
+			#---------------------------------------------------
+			
+		else:
+			#------- Generate masses and phase-space ---------
+			m_stars = n_stars*m_factor
+			#---------- Phase space coordinates --------------
+			print("Generating phase-space values ...")
+			X = self._generate_phase_space(n_stars=m_stars)
+			#------------------------------------------------
+
+			#------------ Masses ------------------------------
+			# Sample from Chabrier prior
+			masses  = ChabrierPrior().sample(m_stars)
+			#--------------------------------------------------
+
+		#---------- Phase-space ------------------------------------
+		df_ps = pd.DataFrame(data=X,columns=self.labels_phase_space)
+
+		#--------- True astrometry -----------------------
+		print("Generating true astrometry ...")
+		df_as,distances = self._generate_true_astrometry(X)
+		#--------------------------------------------------
+
+		#--------- True photometry -------------------------------
+		print("Generating true photometry ...")
+		df_ph = self._generate_true_photometry(masses,distances)
+		#---------------------------------------------------------
+
+		#------- Assert valid masses -------------------------------
+		msg_error = "The number of sources with valid masses is" + \
+				   " smaller than n_stars.\n"
+
+		if mcluster_file:
+			msg_error += "Produce a mcluster file with more stars!"
+		else:
+			msg_error += "Increase m_factor!"
+
+		assert len(df_ph) >= n_stars, msg_error
+		#-----------------------------------------------------------
+
+		#---- Join true values ----------------
+		df_true = df_as.join(df_ph,how="inner")
+		#--------------------------------------
+
+		#--- Sample the desired number of sources ---
+		df_true = df_true.sample(n=n_stars)
+		#--------------------------------------------
 
 		#------------- Observed values ---------------------------------------
 		print("Generating observed values ...")
@@ -368,6 +420,9 @@ class Amasijo(object):
 
 		#-------- Join data frames -----------------------------
 		self.df = df_obs.join(df_true).join(df_ps)
+
+		#-------- Reset index -----------------------
+		self.df.reset_index(drop=True,inplace=True)
 
 		#----------- Save data frame ----------------------------
 		self.df.to_csv(path_or_buf=file,index_label=index_label)
@@ -589,19 +644,19 @@ class Amasijo(object):
 		#-------------------------------------------------
 
 		#---------- Uncertainties ----------------------
-		features = ["ra_error","pmra_error","parallax_error",
-					"radial_velocity_error",
+		features = ["ra_error","pmra_error","pmdec_error",
+					"parallax_error","radial_velocity_error",
 					"g_error","bp_error","rp_error"]
 		labels = [f+u for f,u in zip(features,[" [mas]"," [mas/yr]",
-					" [mas]"," [km/s]"," [mag]"," [mag]"," [mag]"])]
+					" [mas/yr]"," [mas]"," [km/s]"," [mag]"," [mag]"," [mag]"])]
 
-		fig, axs = plt.subplots(nrows=7, ncols=1,figsize=figsize,
-					gridspec_kw={"hspace":0.4})
-		for ax,feature,label in zip(axs,features,labels):
+		fig, axs = plt.subplots(nrows=4, ncols=2,figsize=figsize,
+					gridspec_kw={"hspace":0.3})
+		for ax,feature,label in zip(axs.flatten(),features,labels):
 			ax.hist(self.df[feature],density=True,
 					bins=n_bins,log=True,histtype="step",
 					color=cases["observed"]["color"])
-			ax.set_ylabel("Density")
+			ax.set_ylabel("Density",labelpad=0)
 			ax.set_xlabel(label,labelpad=0)
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
@@ -612,17 +667,18 @@ class Amasijo(object):
 
 if __name__ == "__main__":
 
-	dir_main      =  "/home/javier/Repositories/Amasijo/Data/"
-	file_plot     = dir_main + "Plot.pdf"
-	file_data     = dir_main + "synthetic.csv"
+	dir_main      =  "/home/jolivares/Repos/Amasijo/Data/"
+	file_plot     = dir_main + "EFF_n100_r1_g5.pdf"
+	file_data     = dir_main + "EFF_n100_r1_g5.csv"
 	random_seeds  = [1]    # Random state for the synthetic data
 	n_stars       = 100
+	mcluster_file = dir_main + "EFF_n1000_r1_g5.txt"
 
 	astrometric_args = {
 		"position":{
-			"family":"Gaussian",
-				"loc":np.array([100.,100.,100.]),
-				"scl":np.eye(3)*10.0
+				"family":"Gaussian",
+				"loc":np.array([96.,-277.,-86.]),
+				"scl":np.diag([3.,7.,3.])
 			# "family":"EFF",
 			# 	"loc":np.array([500.,500.,500.]),
 			# 	"scl":np.eye(3)*10.0,
@@ -638,9 +694,9 @@ if __name__ == "__main__":
 			# 	"scl":[np.eye(3)*10.0,np.eye(3)*20.0]
 			},
 		"velocity":{
-			"family":"Gaussian",
-				"loc":np.array([10.,10.,10.]),
-				"scl":np.eye(3)*2.0
+				"family":"Gaussian",
+				"loc":np.array([8,-28,-48]),
+				"scl":np.diag([0.5,0.5,0.5])
 			}
 	}
 	photometric_args = {
@@ -654,6 +710,7 @@ if __name__ == "__main__":
 	for seed in random_seeds:
 		ama = Amasijo(astrometric_args=astrometric_args,
 					  photometric_args=photometric_args,
+					  mcluster_file=mcluster_file,
 					  seed=seed,)
 
 		ama.generate_cluster(file_data,n_stars=n_stars)
