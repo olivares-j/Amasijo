@@ -47,7 +47,6 @@ class Amasijo(object):
 		if self.mcluster_file is not None:
 			self.mcluster = True
 			print("Phase-space coordinates will be read from the MCluster file")
-			print("Therefore, the astrometric parameters will be ignored!")
 		else:
 			self.mcluster = False
 
@@ -668,17 +667,19 @@ class Amasijo(object):
 if __name__ == "__main__":
 
 	dir_main      =  "/home/jolivares/Repos/Amasijo/Data/"
-	file_plot     = dir_main + "EFF_n100_r1_g5.pdf"
-	file_data     = dir_main + "EFF_n100_r1_g5.csv"
+	file_plot     = dir_main + "Gaussian_n100_loc[0,100,0]_scl[2,2,2].pdf"
+	file_data     = dir_main + "Gaussian_n100_loc[0,100,0]_scl[2,2,2].csv"
+	# file_plot     = dir_main + "EFF_n100_r1_g5.pdf"
+	# file_data     = dir_main + "EFF_n100_r1_g5.csv"
 	random_seeds  = [1]    # Random state for the synthetic data
 	n_stars       = 100
-	mcluster_file = dir_main + "EFF_n1000_r1_g5.txt"
+	mcluster_file = None #dir_main + "EFF_n1000_r1_g5.txt"
 
 	astrometric_args = {
 		"position":{
 				"family":"Gaussian",
-				"loc":np.array([96.,-277.,-86.]),
-				"scl":np.diag([3.,7.,3.])
+				"loc":np.array([0.,100.,0.]),
+				"scl":np.diag([2.,2.,2.])
 			# "family":"EFF",
 			# 	"loc":np.array([500.,500.,500.]),
 			# 	"scl":np.eye(3)*10.0,
@@ -695,7 +696,7 @@ if __name__ == "__main__":
 			},
 		"velocity":{
 				"family":"Gaussian",
-				"loc":np.array([8,-28,-48]),
+				"loc":np.array([10.0,0.0,0.0]),
 				"scl":np.diag([0.5,0.5,0.5])
 			}
 	}
@@ -711,7 +712,7 @@ if __name__ == "__main__":
 		ama = Amasijo(astrometric_args=astrometric_args,
 					  photometric_args=photometric_args,
 					  mcluster_file=mcluster_file,
-					  seed=seed,)
+					  seed=seed)
 
 		ama.generate_cluster(file_data,n_stars=n_stars)
 
