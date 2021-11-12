@@ -165,10 +165,10 @@ class Amasijo(object):
 	def _generate_true_photometry(self,masses,distances):
 		#------- Obtains photometry --------------------------------
 		df_ph = self.tracks.generate(masses, 
-									photometric_args["log_age"], 
-									photometric_args["metallicity"], 
+									self.photometric_args["log_age"], 
+									self.photometric_args["metallicity"], 
 									distance=distances, 
-									AV=photometric_args["Av"])
+									AV=self.photometric_args["Av"])
 		#-----------------------------------------------------------
 
 		#----------- Gaia limit ----------------------------------
@@ -358,7 +358,7 @@ class Amasijo(object):
 		if self.mcluster:
 			#--------------- Read mcluster file ----------------
 			print("Reading MCluster phase-space values ...")
-			masses,X = self.read_mcluster(file=mcluster_file)
+			masses,X = self.read_mcluster(file=self.mcluster_file)
 			m_stars = len(masses)
 			msg_error = "The number of sources in" + \
 						"mcluster_file is smaller than n_stars"
@@ -395,7 +395,7 @@ class Amasijo(object):
 		msg_error = "The number of sources with valid masses is" + \
 				   " smaller than n_stars.\n"
 
-		if mcluster_file:
+		if self.mcluster:
 			msg_error += "Produce a mcluster file with more stars!"
 		else:
 			msg_error += "Increase m_factor!"
@@ -666,27 +666,18 @@ class Amasijo(object):
 
 if __name__ == "__main__":
 
-	from pygaia.astrometry.vectorastrometry import astrometry_to_phase_space
-
-
-	x = astrometry_to_phase_space(np.deg2rad(156.194),np.deg2rad(-72.5745),0.508361,-6.88195,1.44544,-22.9)
-	print(x)
-	sys.exit()
-
 	dir_main      =  "/home/jolivares/Repos/Amasijo/Data/"
-	file_plot     = dir_main + "UBC274_n1000.pdf"
-	file_data     = dir_main + "UBC274_n1000.csv"
-	# file_plot     = dir_main + "EFF_n100_r1_g5.pdf"
-	# file_data     = dir_main + "EFF_n100_r1_g5.csv"
+	file_plot     = dir_main + "Gaussian_n100.pdf"
+	file_data     = dir_main + "Gaussian_n100.csv"
 	random_seeds  = [1]    # Random state for the synthetic data
-	n_stars       = 1000
-	mcluster_file = None #dir_main + "EFF_n1000_r1_g5.txt"
+	n_stars       = 100
+	mcluster_file = None 
 
 	astrometric_args = {
 		"position":{
 				"family":"Gaussian",
-				"loc":np.array([-538.9598284271648, 237.77702960580385, -1876.8299362660323]),
-				"scl":np.diag([30.,30.,30.])
+				"loc":np.array([0.0,100.0,0.0]),
+				"scl":np.diag([2.,2.,2.])
 			# "family":"EFF",
 			# 	"loc":np.array([500.,500.,500.]),
 			# 	"scl":np.eye(3)*10.0,
@@ -703,15 +694,15 @@ if __name__ == "__main__":
 			},
 		"velocity":{
 				"family":"Gaussian",
-				"loc":np.array([20.411658352172452, 61.13694542020252, 25.885470528417667]),
+				"loc":np.array([0.0,0.0,0.0]),
 				"scl":np.diag([1.,1.,1.])
 			}
 	}
 	photometric_args = {
-		"log_age": 9.40,     # Solar metallicity
-		"metallicity":-0.1, # Typical value of Bossini+2019
-		"Av": 0.25,          # No extinction
-		"mass_limit":100.0,   # Avoids NaNs in photometry
+		"log_age": 8.2,     # Solar metallicity
+		"metallicity":0.02, # Typical value of Bossini+2019
+		"Av": 0.0,          # No extinction
+		"mass_limit":4.0,   # Avoids NaNs in photometry
 		"bands":["V","I","G","BP","RP"]
 	}
 
