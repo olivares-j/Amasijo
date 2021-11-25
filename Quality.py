@@ -18,115 +18,170 @@ class ClassifierQuality:
 		self.covariate  = covariate
 		self.variate    = variate
 		self.true_class = true_class
-		self.df = pd.read_csv(file_data,usecols=[variate,covariate,true_class])
+
+		if isinstance(file_data,list):
+			if len(file_data)>1:
+				dfs = []
+				for file in file_data:
+					dfs.append(pd.read_csv(file,
+						usecols=[variate,covariate,true_class]))
+
+				self.df = pd.concat(dfs,ignore_index=True)
+				self.dfs = dfs
+				self.multiple_inputs = True
+			else:
+				self.df = pd.read_csv(file_data[0],
+						usecols=[variate,covariate,true_class])
+				self.dfs = [self.df]
 
 
-	def confusion_matrix(self,bins=5,prob_steps=100):
+		elif isinstance(file_data,str):
+			self.df = pd.read_csv(file_data,
+						usecols=[variate,covariate,true_class])
+			self.dfs = [self.df]
+
+		else:
+			sys.exit("file_data must be either a string or a list of strings!")
+
+		self.vmin = self.df[self.covariate].min()
+		self.vmax = self.df[self.covariate].max()
+
+
+	def confusion_matrix(self,bins=5,prob_steps=100,metric="ACC"):
 		''' Compute the confusion matrix on a grid of prob_steps for each bin of the covariate'''
 
 		#------- Split data frame into bins ---------------------
 		if isinstance(bins,int):
-			edges = np.linspace(self.df[self.covariate].min(),self.df[self.covariate].max(),
-								num=bins,endpoint=False)
+			edges = np.linspace(self.vmin,self.vmax,num=bins,endpoint=False)
 		elif isinstance(bins,list):
 			edges = np.array(bins)
 		else:
 			sys.exit("Bins must be integer or list!")
-		bin_cov = np.digitize(self.df[self.covariate].values,bins=edges)
 		#-------------------------------------------------------
 
-		#----------- Loop over bins ----------------------------
-		CMs = []
+		#--------------- Creates MultiIndex dataframe -------------------------------------
+		iterables = [np.arange(len(self.dfs)),np.arange(len(edges)+1),np.arange(prob_steps)]
+		index = pd.MultiIndex.from_product(iterables, names=["case","bin","level"])
+		CM = pd.DataFrame(np.zeros(prob_steps*(len(edges)+1)*len(self.dfs)),
+							columns=["pro"],index=index)
+		#----------------------------------------------------------------------------------
+
+		#------------------------- Loop over dataframes -------------------------------------
+		n_sources = []
+		for j,df in enumerate(self.dfs):
+			#------------------- Digitize dataframe --------------------
+			bin_cov = np.digitize(df[self.covariate].values,bins=edges)
+			#-----------------------------------------------------------
+
+			#------------------ Loop over bins --------------------------------------------
+			Ns = []
+			for i in range(max(bin_cov)+1):
+				if i == 0: # There are no objects in bin zero, so we use it for all objects
+					idx = np.arange(len(df))
+				else:
+					idx = np.where(bin_cov == i)[0]
+
+				#------------- Insert probabilities -----------------------------
+				CM.loc[(j,i),"pro"] = np.linspace(0,1,num=prob_steps,endpoint=True)
+				#----------------------------------------------------------------
+
+				#---- n_sources -------------
+				CM.loc[(j,i),"n_sources"] = len(idx)
+				#----------------------------
+
+				#---------- Positives and Negatives -------------------------------------------------
+				CM.loc[(j,i),"TP"] = CM["pro"].apply(lambda pro: np.sum(
+							(df[self.variate].iloc[idx] >= pro) &
+							 df[self.true_class].iloc[idx]
+							))
+
+				CM.loc[(j,i),"TN"] = CM["pro"].apply(lambda pro: np.sum(
+							(df[self.variate].iloc[idx] < pro)	&   
+							~df[self.true_class].iloc[idx]
+							))
+				CM.loc[(j,i),"FP"] = CM["pro"].apply(lambda pro: np.sum(
+							(df[self.variate].iloc[idx] >= pro) &  
+							~df[self.true_class].iloc[idx]
+							))
+				CM.loc[(j,i),"FN"] = CM["pro"].apply(lambda pro: np.sum(
+							(df[self.variate].iloc[idx] < pro)  &    
+							 df[self.true_class].iloc[idx]
+							))
+
+		#---------- Metrics ------------------------------------------------------------------------
+		CM["CR"]  = 100.* CM["FP"] / (CM["FP"]+CM["TP"])
+		CM["FPR"] = 100.* CM["FP"] / (CM["FP"]+CM["TN"])
+		CM["TPR"] = 100.* CM["TP"] / (CM["TP"]+CM["FN"])
+		CM["PPV"] = 100.* CM["TP"] / (CM["TP"]+CM["FP"])
+		CM["ACC"] = 100.* (CM["TP"] + CM["TN"]) / (CM["TP"]+CM["TN"]+CM["FP"]+CM["FN"])
+		CM["MCC"] = 100. * (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/\
+			np.sqrt((CM["TP"]+CM["FP"])*(CM["TP"]+CM["FN"])*(CM["TN"]+CM["FP"])*(CM["TN"]+CM["FN"]))
+		CM["DST"] = -1.0*np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-1.0)**2)
+		#-------------------------------------------------------------------------------------------
+
+		#------------ Groupby------------------
+		grp = CM.groupby(level=["bin","level"])
+		quality_mean = grp.mean()
+		quality_std  = grp.std()
+		#--------------------------------------
+
+		#------------------ Loop over bins --------------------------------------------
 		optima = []
+		central = []
+		for i in range(len(edges)+1):
+			#---------------- Identify optimum ------------------------------
+			idx_opt = np.nanargmax(quality_mean.loc[(i),metric].to_numpy())
+			optimum_mu = quality_mean.loc[[(i,idx_opt)]]
+			optimum_sd = quality_mean.loc[[(i,idx_opt)]]
+			optimum    = optimum_mu.merge(optimum_sd,suffixes=("","_sd"))
+			#----------------------------------------------------------------
 
-		for i in range(max(bin_cov)+1):
-			if i == 0: # There are no objects in bin zero, so we use it for all objects
-				idx = np.arange(len(self.df))
-			else:
-				idx = np.where(bin_cov == i)[0]
-
-			CM = pd.DataFrame(np.linspace(0,1,num=prob_steps,endpoint=True),columns=["pro"])
-
-			#---------- Positives and Negatives -------------------------------------------------
-			CM["TP"] = CM["pro"].apply(lambda pro: np.sum(
-						(self.df[self.variate].iloc[idx] >= pro) &
-						self.df[self.true_class].iloc[idx]
-						))
-			CM["TN"] = CM["pro"].apply(lambda pro: np.sum(
-						(self.df[self.variate].iloc[idx] < pro)	&   
-						~self.df[self.true_class].iloc[idx]
-						))
-			CM["FP"] = CM["pro"].apply(lambda pro: np.sum(
-						(self.df[self.variate].iloc[idx] >= pro) &  
-						~self.df[self.true_class].iloc[idx]
-						))
-			CM["FN"] = CM["pro"].apply(lambda pro: np.sum(
-						(self.df[self.variate].iloc[idx] < pro)  &    
-						self.df[self.true_class].iloc[idx]
-						))
-
-			#---------- Quality indicators ----------------------------------------------------
-			CM["CR"]  = 100.* CM["FP"] / (CM["FP"]+CM["TP"])
-			CM["FPR"] = 100.* CM["FP"] / (CM["FP"]+CM["TN"])
-			CM["TPR"] = 100.* CM["TP"] / (CM["TP"]+CM["FN"])
-			CM["PPV"] = 100.* CM["TP"] / (CM["TP"]+CM["FP"])
-			CM["ACC"] = 100.* (CM["TP"] + CM["TN"]) / (CM["TP"]+CM["TN"]+CM["FP"]+CM["FN"])
-
-			CM["MCC"] = 100. * (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/np.sqrt(
-				(CM["TP"]+CM["FP"])*(CM["TP"]+CM["FN"])*(CM["TN"]+CM["FP"])*(CM["TN"]+CM["FN"]))
-
-			CM["DST"] = np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-1.0)**2)
-
-			#---------------- Identify optimum ----------
-			idx_opt = np.nanargmax(CM["ACC"].to_numpy())
-			optimum = CM.loc[[idx_opt]]
-			opt_pro = CM["pro"].iloc[[idx_opt]].values[0]
-			#--------------------------------------------
-
-			#----------------- Insert values into DataFrames -------------------------
-			optimum.insert(loc=0,column="n_sources",value=len(idx))
+			#----------------- Insert values into DataFrames ------------
 			if i == 0:
-				#------------------ All Covariate values -----------------------
+				#------------------ All Covariate values ----------------
 				optimum.insert(loc=0,column=self.covariate,value=np.nan)
 				optimum.insert(loc=0,column="Strategy",value="All")
-				CM.insert(loc=0,column="Strategy",value="All")
+				# CM.insert(loc=0,column="Strategy",value="All")
 				#---------------------------------------------------------
 			else:
 				#------------ Bining strategy ------------------------------------------
-				optimum.insert(loc=0,column=self.covariate,
-								value=np.mean(self.df[self.covariate].iloc[idx]))
+				if i < len(edges):
+					value = edges[i-1] + 0.5*(edges[i]-edges[i-1])
+				else:
+					value = edges[i-1] + 0.5*(self.vmax - edges[i-1])
+				value = round(value,2)
+				central.append(value)
+				optimum.insert(loc=0,column=self.covariate,value=value)
 				optimum.insert(loc=0,column="Strategy",value="Bin {0}".format(i))
-				CM.insert(loc=0,column="Strategy",value="Bin {0}".format(i))
+				# CM.insert(loc=0,column="Strategy",value="Bin {0}".format(i))
 				#-----------------------------------------------------------------------
 			#----------------------------------------------------------------------------
 
 			#------- Append ----------------
-			CMs.append(CM)
 			optima.append(optimum)
 			#-------------------------------
 
-		self.CMs = CMs
-		self.optima = optima
-		self.edges = edges
+		self.quality_mu = quality_mean
+		self.quality_sd = quality_std
+		self.optima  = optima
+		self.edges   = edges
+		self.central = central
 
-	def plots(self,file_plot,figsize=(6,6),dpi=200):
+	def plots(self,file_plot,figsize=(10,10),dpi=200):
 		"""Quality Plots """
 
 		#============ Plots ==================================================
 		pdf = PdfPages(file_plot)
 
 		cmap = plt.get_cmap("jet")
-		norm = Normalize(vmin=self.df[self.covariate].min(),
-						 vmax=self.df[self.covariate].max())
+		norm = Normalize(vmin=self.vmin,vmax=self.vmax)
 		sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
 		sm.set_array([])
 
 		#-------------------- Colorbar --------------------------------------
 		ymin,ymax = 99.0,100.0
-		minor_ticks = self.edges
-		major_ticks = self.edges + 0.5*(self.edges[1]-self.edges[0])
+		minor_ticks = np.delete(self.edges.copy(),np.argmin(self.edges))
 		fig, axs = plt.subplots(figsize=figsize)
-
 		divider = make_axes_locatable(axs)
 		# Add an axes above the main axes.
 		cax = divider.append_axes("top", size="7%", pad="2%")
@@ -134,30 +189,36 @@ class ClassifierQuality:
 							orientation="horizontal",
 							ticklocation="top",
 							label=self.covariate,
-							ticks=major_ticks,
+							ticks=self.central,
 							format='%.1f'
 							)
-		# cax0.xaxis.set_label_position("top")
-		# cax0.xaxis.set_ticks_position("top")
-		cbar.ax.xaxis.set_ticks(minor_ticks, minor=True)
-		# # Change tick position to top (with the default tick position "bottom", ticks
-		# # overlap the image).
-		# 
-		
-		# #-----------------------------------------------------------------------------
+		cbar.ax.xaxis.set_ticks(minor_ticks, minor=True)		
+		#-----------------------------------------------------------------------------
 
 		#-------------------- TPR and CR ---------------------------------------------------------------
-		axs.plot(self.CMs[0]["pro"],self.CMs[0]["TPR"],color="black",         label="TPR")
-		axs.plot(self.CMs[0]["pro"],self.CMs[0]["CR"],color="black",ls="--", label="CR")
-		axs.scatter(self.optima[0]["pro"],self.optima[0]["TPR"],c="black",marker="X",label="_nolegend_",zorder=10)
-		axs.scatter(self.optima[0]["pro"],self.optima[0]["CR"],c="black",marker="X",label="_nolegend_",zorder=10)
-		for tmp,opt in zip(self.CMs[1:],self.optima[1:]):
-			axs.plot(tmp["pro"],tmp["TPR"],c=cmap(norm(opt[self.covariate].values[0])),label="_nolegend_")
-			axs.plot(tmp["pro"],tmp["CR"],c=cmap(norm(opt[self.covariate].values[0])),ls="--",label="_nolegend_")		
-			axs.scatter(opt["pro"],opt["TPR"],c=opt[self.covariate].values,cmap=cmap,norm=norm,
-												marker="X",label="_nolegend_",zorder=10)
-			axs.scatter(opt["pro"],opt["CR"],c=opt[self.covariate].values,cmap=cmap,norm=norm,
-												marker="X",label="_nolegend_",zorder=10)
+		for i,OP in enumerate(self.optima):
+			MU = self.quality_mu.loc[(i)]
+			SD = self.quality_sd.loc[(i)]
+			if i==0:
+				color    ="black"
+				label_tp = "TPR"
+				label_cr = "CR"
+			else:
+				color    = cmap(norm(OP[self.covariate].values[0]))
+				label_tp = "_nolegend_"
+				label_cr = "_nolegend_"
+
+			axs.fill_between(MU["pro"],MU["TPR"]-SD["TPR"],MU["TPR"]+SD["TPR"],
+							color=color,
+							zorder=-1,alpha=0.2)
+			axs.fill_between(MU["pro"],MU["CR"]-SD["CR"],MU["CR"]+SD["CR"],
+							color=color,
+							zorder=-1,alpha=0.2)
+
+			axs.plot(MU["pro"],MU["TPR"],c=color,label=label_tp)
+			axs.plot(MU["pro"],MU["CR"], c=color,ls="--",label=label_cr)		
+			axs.scatter(OP["pro"],OP["TPR"],color=color,marker="X",label="_nolegend_",zorder=10)
+			axs.scatter(OP["pro"],OP["CR"],color=color,marker="X",label="_nolegend_",zorder=10)
 
 		axs.set_xlim(0,1.0)
 		axs.set_ylim(0,100.0)
@@ -171,6 +232,60 @@ class ClassifierQuality:
 		axs.legend(loc="center left",ncol=1)
 		pdf.savefig(bbox_inches="tight",dpi=dpi)
 		plt.close()
+		#-------------------------------------------------------------------------------
+
+		#------------------------ Metrics ----------------------------------------------
+		fig, axs = plt.subplots(nrows=2, ncols=2, sharex=True,figsize=figsize)
+		plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=0.0)
+		#-------------------- Colorbar --------------------------------------
+		# ymin,ymax = 99.0,100.0
+		# minor_ticks = np.delete(self.edges.copy(),np.argmin(self.edges))
+		# fig, axs = plt.subplots(figsize=figsize)
+		# divider = make_axes_locatable(axs)
+		# Add an axes above the main axes.
+		# cax = divider.append_axes("top", size="7%", pad="2%")
+		cbar = fig.colorbar(sm, 
+							# cax=cax, 
+							ax = axs,
+							orientation="horizontal",
+							ticklocation="top",
+							label=self.covariate,
+							ticks=self.central,
+							format='%.1f',
+							pad=0.07
+							)
+		cbar.ax.xaxis.set_ticks(minor_ticks, minor=True)		
+		#-----------------------------------------------------------------------------
+
+		for ax,m in zip(axs.flatten(),["PPV","ACC","MCC","DST"]):
+			for i,OP in enumerate(self.optima):
+				MU = self.quality_mu.loc[(i)]
+				SD = self.quality_sd.loc[(i)]
+				if i==0:
+					color   ="black"
+				else:
+					color   = cmap(norm(OP[self.covariate].values[0]))
+
+				ax.fill_between(MU["pro"],MU[m]-SD[m],MU[m]+SD[m],
+								color=color,
+								zorder=0,alpha=0.2)
+				ax.plot(MU["pro"],MU[m],c=color,zorder=1)	
+				ax.scatter(OP["pro"],OP[m],color=color,marker="X",zorder=2)
+
+			ax.set_xlim(0,1.0)
+			# ax.set_xticks(np.arange(0,1,step=0.1))
+			# ax.xaxis.set_major_formatter(FormatStrFormatter('%1.1f'))
+			# ax.yaxis.set_major_locator(MultipleLocator(10))
+			# ax.yaxis.set_major_formatter(FormatStrFormatter('%d'))
+			# For the minor ticks, use no labels; default NullFormatter.
+			# ax.yaxis.set_minor_locator(MultipleLocator(5))
+			ax.set_ylabel(m,labelpad=0)
+		axs[1,0].set_xlabel("Probability")
+		axs[1,1].set_xlabel("Probability")
+		pdf.savefig(bbox_inches="tight",dpi=dpi)
+		plt.close()
+		#-------------------------------------------------------------------------------
+
 		pdf.close()
 
 	def save(self,file):
