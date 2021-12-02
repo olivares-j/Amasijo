@@ -71,8 +71,9 @@ class ClassifierQuality:
 							columns=["pro"],index=index)
 		#----------------------------------------------------------------------------------
 
+		thresholds =  np.linspace(0,0.999,num=prob_steps,endpoint=True)
+
 		#------------------------- Loop over dataframes -------------------------------------
-		n_sources = []
 		for j,df in enumerate(self.dfs):
 			#------------------- Digitize dataframe --------------------
 			bin_cov = np.digitize(df[self.covariate].values,bins=edges)
@@ -90,27 +91,31 @@ class ClassifierQuality:
 				tmp = df.iloc[idx].copy()
 				#-------------------------
 
-				#------------- Insert probabilities -----------------------------
-				CM.loc[(j,i),"pro"] = np.linspace(0,1,num=prob_steps,endpoint=False)
-				#----------------------------------------------------------------
+				#-----------------------------------------------------
+				trues = tmp[self.true_class].to_numpy()
+				probs = tmp[self.variate].to_numpy()
+				TP = np.empty(prob_steps)
+				TN = np.empty(prob_steps)
+				FP = np.empty(prob_steps)
+				FN = np.empty(prob_steps)
+				for p,th in enumerate(thresholds):
+					TP[p] = np.logical_and(probs>=th, trues).sum()
+					TN[p] = np.logical_and(probs< th,~trues).sum()
+					FP[p] = np.logical_and(probs>=th,~trues).sum()
+					FN[p] = np.logical_and(probs< th, trues).sum()
+
+
+				#----- Insert values ------------
+				CM.loc[(j,i),"pro"] = thresholds
+				CM.loc[(j,i),"TP"]  = TP
+				CM.loc[(j,i),"TN"]  = TN
+				CM.loc[(j,i),"FP"]  = FP
+				CM.loc[(j,i),"FN"]  = FN
+				#-------------------------------
 
 				#---- n_sources --------------------
 				CM.loc[(j,i),"n_sources"] = len(idx)
 				#-----------------------------------
-
-				#---------- Positives and Negatives -------------------------------------
-				CM.loc[(j,i),"TP"] = CM["pro"].apply(lambda pro: np.sum(
-									(tmp[self.variate] >= pro) & tmp[self.true_class]))
-
-				CM.loc[(j,i),"TN"] = CM["pro"].apply(lambda pro: np.sum(
-									(tmp[self.variate] < pro) & ~tmp[self.true_class]))
-
-				CM.loc[(j,i),"FP"] = CM["pro"].apply(lambda pro: np.sum(
-									(tmp[self.variate] >= pro) & ~tmp[self.true_class]))
-
-				CM.loc[(j,i),"FN"] = CM["pro"].apply(lambda pro: np.sum(
-									(tmp[self.variate] < pro)  & tmp[self.true_class]))
-				#------------------------------------------------------------------------
 
 		#---------- Metrics ------------------------------------------------------------------------
 		CM["CR"]  = 100.* CM["FP"] / (CM["FP"]+CM["TP"])
@@ -145,7 +150,6 @@ class ClassifierQuality:
 				#------------------ All Covariate values ----------------
 				optimum.insert(loc=0,column=self.covariate,value=np.nan)
 				optimum.insert(loc=0,column="Strategy",value="All")
-				# CM.insert(loc=0,column="Strategy",value="All")
 				#---------------------------------------------------------
 			else:
 				#------------ Bining strategy ------------------------------------------
@@ -157,7 +161,6 @@ class ClassifierQuality:
 				central.append(value)
 				optimum.insert(loc=0,column=self.covariate,value=value)
 				optimum.insert(loc=0,column="Strategy",value="Bin {0}".format(i))
-				# CM.insert(loc=0,column="Strategy",value="Bin {0}".format(i))
 				#-----------------------------------------------------------------------
 			#----------------------------------------------------------------------------
 
@@ -297,7 +300,8 @@ class ClassifierQuality:
 		tab.set_index("Strategy",inplace=True)
 
 		#-------------- Save as latex ---------------------------------
-		tab = tab.loc[:,[self.covariate,"pro","n_sources","TP","FP",
+		tab = tab.loc[:,[self.covariate,"pro","n_sources",
+						"TP","FP","TN","FN",
 						"TPR","CR","FPR","PPV","ACC","MCC","DST"]]
 		tab.to_latex(file_tex,column_format=13*"|c" + "|",
 						float_format="%.2f",na_rep="-",escape=False)
