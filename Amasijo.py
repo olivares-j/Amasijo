@@ -73,16 +73,16 @@ class Amasijo(object):
 		self.labels_true_as = ["ra_true","dec_true","parallax_true",
 								"pmra_true","pmdec_true","radial_velocity_true"]
 		self.labels_true_ph = [band+"_mag" for band in photometric_args["bands"]]
-		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","radial_velocity"]
+		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","dr2_radial_velocity"]
 		self.labels_unc_as  = ["ra_error","dec_error","parallax_error",
-								"pmra_error","pmdec_error","radial_velocity_error"]
+								"pmra_error","pmdec_error","dr2_radial_velocity_error"]
 		self.labels_cor_as  = ["ra_dec_corr","ra_parallax_corr","ra_pmra_corr","ra_pmdec_corr",
 							   "dec_parallax_corr","dec_pmra_corr","dec_pmdec_corr",
 							   "parallax_pmra_corr","parallax_pmdec_corr",
 							   "pmra_pmdec_corr"]
 		self.labels_obs_ph  = ["g","bp","rp"]
 		self.labels_unc_ph  = ["g_error","bp_error","rp_error"]
-		self.labels_rvl     = ["radial_velocity","radial_velocity_error"]
+		self.labels_rvl     = ["dr2_radial_velocity","dr2_radial_velocity_error"]
 		#--------------------------------------------------------------------------------------------
 
 	def _read_kalkayotl(self,file):
@@ -661,7 +661,7 @@ class Amasijo(object):
 
 		#------------ Radial velocity ----------------------------
 		plt.figure(figsize=figsize)
-		plt.hist(self.df["radial_velocity"],density=False,
+		plt.hist(self.df[self.labels_rvl[0]],density=False,
 					bins=n_bins,histtype="step",
 					color=cases["observed"]["color"],
 					label=cases["observed"]["label"])
@@ -714,12 +714,14 @@ class Amasijo(object):
 		plt.close()
 		#-------------------------------------------------
 
-		#---------- Uncertainties ----------------------
-		features = ["ra_error","pmra_error","pmdec_error",
-					"parallax_error","radial_velocity_error",
-					"g_error","bp_error","rp_error"]
-		labels = [f+u for f,u in zip(features,[" [mas]"," [mas/yr]",
-					" [mas/yr]"," [mas]"," [km/s]"," [mag]"," [mag]"," [mag]"])]
+		#---------- Uncertainties --------------------------------
+		features = sum([self.labels_unc_as,self.labels_unc_ph],[])
+		features.remove("dec_error")
+		labels_features = [" [mas]"," [mas]",
+							" [mas/yr]"," [mas/yr]",
+							" [km/s]"," [mag]",
+							" [mag]"," [mag]"]
+		labels = [f+u for f,u in zip(features,labels_features)]
 
 		fig, axs = plt.subplots(nrows=4, ncols=2,figsize=figsize,
 					gridspec_kw={"hspace":0.3})
@@ -731,7 +733,7 @@ class Amasijo(object):
 			ax.set_xlabel(label,labelpad=0)
 		pdf.savefig(bbox_inches='tight')
 		plt.close()
-		#--------------------------------------------------------
+		#----------------------------------------------------------
 
 		pdf.close()
 	#------------------------------------------------------------------------------
