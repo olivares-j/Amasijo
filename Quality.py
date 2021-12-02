@@ -86,32 +86,31 @@ class ClassifierQuality:
 				else:
 					idx = np.where(bin_cov == i)[0]
 
+				#-- Temporary dataframe --
+				tmp = df.iloc[idx].copy()
+				#-------------------------
+
 				#------------- Insert probabilities -----------------------------
-				CM.loc[(j,i),"pro"] = np.linspace(0,1,num=prob_steps,endpoint=True)
+				CM.loc[(j,i),"pro"] = np.linspace(0,1,num=prob_steps,endpoint=False)
 				#----------------------------------------------------------------
 
-				#---- n_sources -------------
+				#---- n_sources --------------------
 				CM.loc[(j,i),"n_sources"] = len(idx)
-				#----------------------------
+				#-----------------------------------
 
-				#---------- Positives and Negatives -------------------------------------------------
+				#---------- Positives and Negatives -------------------------------------
 				CM.loc[(j,i),"TP"] = CM["pro"].apply(lambda pro: np.sum(
-							(df[self.variate].iloc[idx] >= pro) &
-							 df[self.true_class].iloc[idx]
-							))
+									(tmp[self.variate] >= pro) & tmp[self.true_class]))
 
 				CM.loc[(j,i),"TN"] = CM["pro"].apply(lambda pro: np.sum(
-							(df[self.variate].iloc[idx] < pro)	&   
-							~df[self.true_class].iloc[idx]
-							))
+									(tmp[self.variate] < pro) & ~tmp[self.true_class]))
+
 				CM.loc[(j,i),"FP"] = CM["pro"].apply(lambda pro: np.sum(
-							(df[self.variate].iloc[idx] >= pro) &  
-							~df[self.true_class].iloc[idx]
-							))
+									(tmp[self.variate] >= pro) & ~tmp[self.true_class]))
+
 				CM.loc[(j,i),"FN"] = CM["pro"].apply(lambda pro: np.sum(
-							(df[self.variate].iloc[idx] < pro)  &    
-							 df[self.true_class].iloc[idx]
-							))
+									(tmp[self.variate] < pro)  & tmp[self.true_class]))
+				#------------------------------------------------------------------------
 
 		#---------- Metrics ------------------------------------------------------------------------
 		CM["CR"]  = 100.* CM["FP"] / (CM["FP"]+CM["TP"])
@@ -119,7 +118,7 @@ class ClassifierQuality:
 		CM["TPR"] = 100.* CM["TP"] / (CM["TP"]+CM["FN"])
 		CM["PPV"] = 100.* CM["TP"] / (CM["TP"]+CM["FP"])
 		CM["ACC"] = 100.* (CM["TP"] + CM["TN"]) / (CM["TP"]+CM["TN"]+CM["FP"]+CM["FN"])
-		CM["MCC"] = 100. * (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/\
+		CM["MCC"] = 100.* (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/\
 			np.sqrt((CM["TP"]+CM["FP"])*(CM["TP"]+CM["FN"])*(CM["TN"]+CM["FP"])*(CM["TN"]+CM["FN"]))
 		CM["DST"] = -1.0*np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-1.0)**2)
 		#-------------------------------------------------------------------------------------------
@@ -306,6 +305,8 @@ class ClassifierQuality:
 
 
 		#-------------- pickle ---------------------
-		quality = {"edges":self.edges,"thresholds":tab["pro"]}
+		quality = {"edges":self.edges,
+				   "thresholds":tab["pro"],
+				   "covariate":self.covariate}
 		with open(file_tex.replace(".tex",".pkl"), 'wb') as out_strm: 
 			dill.dump(quality, out_strm,protocol=2)
