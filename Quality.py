@@ -19,36 +19,37 @@ class ClassifierQuality:
 		self.variate    = variate
 		self.true_class = true_class
 
+		error_message = "file_data must be DataFrame, string, or list of both."
+		usecols = [variate,covariate,true_class]
+
 		if isinstance(file_data,list):
-			if len(file_data)>1:
-				dfs = []
-				for file in file_data:
-					dfs.append(pd.read_csv(file,
-						usecols=[variate,covariate,true_class]))
+			dfs = []
+			for data in file_data:	
+				if isinstance(data,str):
+					df = pd.read_csv(data,usecols=usecols)
+					dfs.append(df)
+				elif isinstance(data,pd.DataFrame):
+					df = data[usecols].copy()
+					dfs.append(df)
+				else:
+					sys.exit(error_message)
 
-				self.df = pd.concat(dfs,ignore_index=True)
-				self.dfs = dfs
-				self.multiple_inputs = True
-			else:
-				self.df = pd.read_csv(file_data[0],
-						usecols=[variate,covariate,true_class])
-				self.dfs = [self.df]
-
+			self.df  = pd.concat(dfs,ignore_index=True)
+			self.dfs = dfs
 
 		elif isinstance(file_data,str):
-			self.df = pd.read_csv(file_data,
-						usecols=[variate,covariate,true_class])
+			self.df = pd.read_csv(file_data,usecols=usecols)
 			self.dfs = [self.df]
 
 		elif isinstance(file_data,pd.DataFrame):
-			self.df = file_data
+			self.df = file_data[usecols].copy()
 			self.dfs = [self.df]
 
 		else:
-			sys.exit("file_data must be either a string or a list of strings!")
+			sys.exit(error_message)
 
-		self.vmin = self.df[self.covariate].min()
-		self.vmax = self.df[self.covariate].max()
+		self.vmin = self.df[covariate].min()
+		self.vmax = self.df[covariate].max()
 
 
 	def confusion_matrix(self,bins=5,prob_steps=100,metric="ACC"):
