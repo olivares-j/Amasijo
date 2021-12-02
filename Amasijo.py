@@ -23,9 +23,10 @@ from isochrones.priors import ChabrierPrior
 class Amasijo(object):
 	"""This class intends to construct synthetic clusters with simple 
 		astrometric distributions and photometry from stellar models"""
-	def __init__(self,astrometric_args,
-					photometric_args,
+	def __init__(self,photometric_args,
+					astrometric_args=None,
 					mcluster_file=None,
+					kalkayotl_file=None,
 					seed=1234):
 
 		#------ Set Seed -----------------
@@ -43,12 +44,29 @@ class Amasijo(object):
 						bands=photometric_args["bands"])
 		#---------------------------------------------------
 
-		#------- MCluster or not --------------------------
+		#------- MCluster or not -------------------------------------------------
 		if self.mcluster_file is not None:
 			self.mcluster = True
 			print("Phase-space coordinates will be read from the MCluster file")
 		else:
 			self.mcluster = False
+		#-------------------------------------------------------------------------
+
+		#----------- Kalkayotl file -------------------------------------------------------------
+		msg_kal = "Astrometric arguments will be superseeded by those from the Kalkayotl file!"
+		if kalkayotl_file is not None:
+			print(msg_kal)
+			assert os.path.exists(kalkayotl_file), "Input Kalkayotl file does not exists!"
+			self.astrometric_args = self._read_kalkayotl(kalkayotl_file)
+		#----------------------------------------------------------------------------------------
+
+		#------- MCluster or not -------------------------------------------------
+		if self.mcluster_file is not None:
+			self.mcluster = True
+			print("Phase-space coordinates will be read from the MCluster file")
+		else:
+			self.mcluster = False
+		#-------------------------------------------------------------------------
 
 		#------- Labels ----------------------------------------------------------------------------------
 		self.labels_phase_space = ["X","Y","Z","U","V","W"]
@@ -67,81 +85,136 @@ class Amasijo(object):
 		self.labels_rvl     = ["radial_velocity","radial_velocity_error"]
 		#--------------------------------------------------------------------------------------------
 
-	#====================== Generate Astrometric Data ==================================================
+	def _read_kalkayotl(self,file):
+		param = pd.read_csv(file,usecols=["Parameter","mode"])
 
+		#---- Extract parameters ------------------------------------------------
+		loc  = param.loc[param["Parameter"].str.contains("loc"),"mode"].values
+		param.fillna(value=1.0,inplace=True)
+		stds = param.loc[param["Parameter"].str.contains('stds'),"mode"].values
+		corr = param.loc[param["Parameter"].str.contains('corr'),"mode"].values
+		#------------------------------------------------------------------------
+
+		#---- Construct covariance --------------
+		stds = np.diag(stds)
+		corr = np.reshape(corr,(6,6))
+		cov  = np.dot(stds,corr.dot(stds))
+		#-----------------------------------------
+
+		astrometric_args = {
+		"position+velocity":{
+				"family":"Gaussian",
+				"location":loc,
+				"covariance":cov}
+			}
+
+		return astrometric_args
+
+	#====================== Generate Astrometric Data ==================================================
 	def _generate_phase_space(self,n_stars):
 		'''	The phase space coordinates are
-    		assumed to represent barycentric (i.e. centred on the Sun) positions and velocities.
-    	'''
-		position_args = self.astrometric_args["position"]
-		velocity_args = self.astrometric_args["velocity"]
+			assumed to represent barycentric (i.e. centred on the Sun) positions and velocities.
+		'''
+		#=============== Joined =================================================================
+		if "position+velocity" in self.astrometric_args:
+			join_args = self.astrometric_args["position+velocity"]
+			if join_args["family"] == "Gaussian":
+				XYZUVW = st.multivariate_normal.rvs(
+							mean=join_args["location"],
+							cov=join_args["covariance"],
+							size=n_stars)
 
-		#======================= Verification ==============================================================
-		msg_0 = "Error in position arguments: loc and scale must have same dimension."
-		msg_1 = "Error in position arguments: family {0} is not implemented".format(position_args["family"]) 
+			elif self.astrometric_args["position+velocity"]["family"] == "GMM":
+				assert np.sum(join_args["weights"]) == 1.0,"weights must be a simplex"
+				n_cmp = len(join_args["weights"])
+				n_stars_cmp = np.floor(join_args["weights"]*n_stars).astype('int')
+				n_res = n_stars - np.sum(n_stars_cmp)
+				residual = np.ones(n_cmp).astype('int')
+				residual[n_res:] = 0
+				n_stars_cmp += residual
+				assert np.sum(n_stars_cmp) == n_stars, "Check division of sources in GMM!"
 
-		assert len(position_args["loc"]) == len(position_args["scl"]), msg_0
-		assert position_args["family"] in ["Gaussian","EFF","King","GMM"], msg_1
+				l = []
+				for n,loc,cov in zip(n_stars_cmp,join_args["location"],join_args["covariance"]):
+					l.append(st.multivariate_normal.rvs(mean=loc,cov=cov,size=n))
 
-		#=============================== Positions ========================================================
-		if position_args["family"] == "Gaussian":
-			XYZ = st.multivariate_normal.rvs(mean=position_args["loc"],cov=position_args["scl"],
-												size=n_stars)
+				XYZUVW = np.concatenate(l,axis=0)
 
-		elif position_args["family"] == "EFF":
-			XYZ = mveff.rvs(loc=position_args["loc"],scale=position_args["scl"],
-							gamma=position_args["gamma"],size=n_stars)
+			else:
+				sys.exit("Specified family currently not supported for 'position+velocity' type")
 
-		elif position_args["family"] == "King":
-			XYZ = mvking.rvs(loc=position_args["loc"],scale=position_args["scl"],
-							rt=position_args["tidal_radius"],size=n_stars)
 
-		elif position_args["family"] == "GMM":
-			assert np.sum(position_args["weights"]) == 1.0,"weights must be a simplex"
-			n_cmp = len(position_args["weights"])
-			n_stars_cmp = np.floor(position_args["weights"]*n_stars).astype('int')
-			n_res = n_stars - np.sum(n_stars_cmp)
-			residual = np.ones(n_cmp).astype('int')
-			residual[n_res:] = 0
-			n_stars_cmp += residual
-			assert np.sum(n_stars_cmp) == n_stars, "Check division of sources in GMM!"
-
-			l = []
-			for n,loc,scl in zip(n_stars_cmp,position_args["loc"],position_args["scl"]):
-				l.append(st.multivariate_normal.rvs(mean=loc,cov=scl,size=n))
-
-			XYZ = np.concatenate(l,axis=0)
-
+		#========================================================================================
 		else:
-			sys.exit("Error: incorrect position family argument")
-		#===============================================================================================
+			position_args = self.astrometric_args["position"]
+			velocity_args = self.astrometric_args["velocity"]
 
-		#=============================== Velocities ========================================================
-		if velocity_args["family"] == "Gaussian":
-			UVW = st.multivariate_normal.rvs(mean=velocity_args["loc"],cov=velocity_args["scl"],
-												size=n_stars)
+			#======================= Verification ==============================================================
+			msg_0 = "Error in position arguments: loc and scale must have same dimension."
+			msg_1 = "Error in position arguments: family {0} is not implemented".format(position_args["family"]) 
 
-		elif velocity_args["family"] == "GMM":
-			assert np.sum(velocity_args["weights"]) == 1.0,"weights must be a simplex"
-			n_cmp = len(velocity_args["weights"])
-			n_stars_cmp = np.floor(velocity_args["weights"]*n_stars).astype('int')
-			n_res = n_stars - np.sum(n_stars_cmp)
-			residual = np.ones(n_cmp).astype('int')
-			residual[n_res:] = 0
-			n_stars_cmp += residual
-			assert np.sum(n_stars_cmp) == n_stars, "Check division of sources in GMM!"
+			assert len(position_args["location"]) == len(position_args["covariance"]), msg_0
+			assert position_args["family"] in ["Gaussian","EFF","King","GMM"], msg_1
 
-			l = []
-			for n,loc,scl in zip(n_stars_cmp,velocity_args["loc"],velocity_args["scl"]):
-				l.append(st.multivariate_normal.rvs(mean=loc,cov=scl,size=n))
+			#=============================== Positions ========================================================
+			if position_args["family"] == "Gaussian":
+				XYZ = st.multivariate_normal.rvs(mean=position_args["location"],cov=position_args["covariance"],
+													size=n_stars)
 
-			UVW = np.concatenate(l,axis=0)
+			elif position_args["family"] == "EFF":
+				XYZ = mveff.rvs(loc=position_args["location"],scale=position_args["covariance"],
+								gamma=position_args["gamma"],size=n_stars)
 
-		else:
-			sys.exit("Error: incorrect velocity family argument")
-		#===============================================================================================
+			elif position_args["family"] == "King":
+				XYZ = mvking.rvs(loc=position_args["location"],scale=position_args["covariance"],
+								rt=position_args["tidal_radius"],size=n_stars)
 
-		XYZUVW = np.hstack((XYZ,UVW))
+			elif position_args["family"] == "GMM":
+				assert np.sum(position_args["weights"]) == 1.0,"weights must be a simplex"
+				n_cmp = len(position_args["weights"])
+				n_stars_cmp = np.floor(position_args["weights"]*n_stars).astype('int')
+				n_res = n_stars - np.sum(n_stars_cmp)
+				residual = np.ones(n_cmp).astype('int')
+				residual[n_res:] = 0
+				n_stars_cmp += residual
+				assert np.sum(n_stars_cmp) == n_stars, "Check division of sources in GMM!"
+
+				l = []
+				for n,loc,scl in zip(n_stars_cmp,position_args["location"],position_args["covariance"]):
+					l.append(st.multivariate_normal.rvs(mean=loc,cov=scl,size=n))
+
+				XYZ = np.concatenate(l,axis=0)
+
+			else:
+				sys.exit("Error: incorrect position family argument")
+			#===============================================================================================
+
+			#=============================== Velocities ========================================================
+			if velocity_args["family"] == "Gaussian":
+				UVW = st.multivariate_normal.rvs(mean=velocity_args["location"],cov=velocity_args["covariance"],
+													size=n_stars)
+
+			elif velocity_args["family"] == "GMM":
+				assert np.sum(velocity_args["weights"]) == 1.0,"weights must be a simplex"
+				n_cmp = len(velocity_args["weights"])
+				n_stars_cmp = np.floor(velocity_args["weights"]*n_stars).astype('int')
+				n_res = n_stars - np.sum(n_stars_cmp)
+				residual = np.ones(n_cmp).astype('int')
+				residual[n_res:] = 0
+				n_stars_cmp += residual
+				assert np.sum(n_stars_cmp) == n_stars, "Check division of sources in GMM!"
+
+				l = []
+				for n,loc,scl in zip(n_stars_cmp,velocity_args["location"],velocity_args["covariance"]):
+					l.append(st.multivariate_normal.rvs(mean=loc,cov=scl,size=n))
+
+				UVW = np.concatenate(l,axis=0)
+
+			else:
+				sys.exit("Error: incorrect velocity family argument")
+			#===============================================================================================
+
+			XYZUVW = np.hstack((XYZ,UVW))
 
 		return XYZUVW
 
@@ -342,8 +415,8 @@ class Amasijo(object):
 		X = mc[self.labels_phase_space].to_numpy()
 
 		#-------- Shift positions and velocities ---
-		X[:,:3] += np.array(position_args["loc"])
-		X[:,3:] += np.array(velocity_args["loc"])
+		X[:,:3] += np.array(position_args["location"])
+		X[:,3:] += np.array(velocity_args["location"])
 		#-------------------------------------------
 
 		return masses,X
@@ -360,8 +433,7 @@ class Amasijo(object):
 			print("Reading MCluster phase-space values ...")
 			masses,X = self.read_mcluster(file=self.mcluster_file)
 			m_stars = len(masses)
-			msg_error = "The number of sources in" + \
-						"mcluster_file is smaller than n_stars"
+			msg_error = "The mcluster_file contains less than {0}.".format(n_stars)
 			assert m_stars >= n_stars, msg_error
 			#---------------------------------------------------
 			
@@ -676,26 +748,26 @@ if __name__ == "__main__":
 	astrometric_args = {
 		"position":{
 				"family":"Gaussian",
-				"loc":np.array([0.0,100.0,0.0]),
-				"scl":np.diag([2.,2.,2.])
+				"location":np.array([0.0,100.0,0.0]),
+				"covariance":np.diag([2.,2.,2.])
 			# "family":"EFF",
-			# 	"loc":np.array([500.,500.,500.]),
-			# 	"scl":np.eye(3)*10.0,
+			# 	"location":np.array([500.,500.,500.]),
+			# 	"covariance":np.eye(3)*10.0,
 			# 	"gamma":3.5
 			# "family":"King",
-			# 	"loc":np.array([500.,500.,500.]),
-			# 	"scl":np.eye(3)*10.0,
+			# 	"location":np.array([500.,500.,500.]),
+			# 	"covariance":np.eye(3)*10.0,
 			# 	"tidal_radius":5.
 			# "family":"GMM",
 			# 	"weights":np.array([0.4,0.6]),
-			# 	"loc":[np.array([500.,500.,500.]),
+			# 	"location":[np.array([500.,500.,500.]),
 			# 		   np.array([550.,550.,550.])],
-			# 	"scl":[np.eye(3)*10.0,np.eye(3)*20.0]
+			# 	"covariance":[np.eye(3)*10.0,np.eye(3)*20.0]
 			},
 		"velocity":{
 				"family":"Gaussian",
-				"loc":np.array([0.0,0.0,0.0]),
-				"scl":np.diag([1.,1.,1.])
+				"location":np.array([0.0,0.0,0.0]),
+				"covariance":np.diag([1.,1.,1.])
 			}
 	}
 	photometric_args = {

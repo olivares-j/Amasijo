@@ -40,6 +40,10 @@ class ClassifierQuality:
 						usecols=[variate,covariate,true_class])
 			self.dfs = [self.df]
 
+		elif isinstance(file_data,pd.DataFrame):
+			self.df = file_data
+			self.dfs = [self.df]
+
 		else:
 			sys.exit("file_data must be either a string or a list of strings!")
 
@@ -288,19 +292,19 @@ class ClassifierQuality:
 
 		pdf.close()
 
-	def save(self,file):
+	def save(self,file_tex):
 		tab = pd.concat(self.optima,ignore_index=True,sort=False)
 		tab.set_index("Strategy",inplace=True)
 
 		#-------------- Save as latex ---------------------------------
 		tab = tab.loc[:,[self.covariate,"pro","n_sources","TP","FP",
 						"TPR","CR","FPR","PPV","ACC","MCC","DST"]]
-		tab.to_latex(file.replace(".pkl",".tex"),column_format=13*"|c" + "|",
+		tab.to_latex(file_tex,column_format=13*"|c" + "|",
 						float_format="%.2f",na_rep="-",escape=False)
 		#--------------------------------------------------------------
 
 
 		#-------------- pickle ---------------------
 		quality = {"edges":self.edges,"thresholds":tab["pro"]}
-		with open(file, 'wb') as out_strm: 
+		with open(file_tex.replace(".tex",".pkl"), 'wb') as out_strm: 
 			dill.dump(quality, out_strm,protocol=2)
