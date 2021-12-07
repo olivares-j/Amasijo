@@ -19,36 +19,37 @@ class ClassifierQuality:
 		self.variate    = variate
 		self.true_class = true_class
 
+		error_message = "file_data must be DataFrame, string, or list of both."
+		usecols = [variate,covariate,true_class]
+
 		if isinstance(file_data,list):
-			if len(file_data)>1:
-				dfs = []
-				for file in file_data:
-					dfs.append(pd.read_csv(file,
-						usecols=[variate,covariate,true_class]))
+			dfs = []
+			for data in file_data:	
+				if isinstance(data,str):
+					df = pd.read_csv(data,usecols=usecols)
+					dfs.append(df)
+				elif isinstance(data,pd.DataFrame):
+					df = data[usecols].copy()
+					dfs.append(df)
+				else:
+					sys.exit(error_message)
 
-				self.df = pd.concat(dfs,ignore_index=True)
-				self.dfs = dfs
-				self.multiple_inputs = True
-			else:
-				self.df = pd.read_csv(file_data[0],
-						usecols=[variate,covariate,true_class])
-				self.dfs = [self.df]
-
+			self.df  = pd.concat(dfs,ignore_index=True)
+			self.dfs = dfs
 
 		elif isinstance(file_data,str):
-			self.df = pd.read_csv(file_data,
-						usecols=[variate,covariate,true_class])
+			self.df = pd.read_csv(file_data,usecols=usecols)
 			self.dfs = [self.df]
 
 		elif isinstance(file_data,pd.DataFrame):
-			self.df = file_data
+			self.df = file_data[usecols].copy()
 			self.dfs = [self.df]
 
 		else:
-			sys.exit("file_data must be either a string or a list of strings!")
+			sys.exit(error_message)
 
-		self.vmin = self.df[self.covariate].min()
-		self.vmax = self.df[self.covariate].max()
+		self.vmin = self.df[covariate].min()
+		self.vmax = self.df[covariate].max()
 
 
 	def confusion_matrix(self,bins=5,prob_steps=100,metric="ACC"):
@@ -70,8 +71,9 @@ class ClassifierQuality:
 							columns=["pro"],index=index)
 		#----------------------------------------------------------------------------------
 
+		thresholds =  np.linspace(0,0.999,num=prob_steps,endpoint=True)
+
 		#------------------------- Loop over dataframes -------------------------------------
-		n_sources = []
 		for j,df in enumerate(self.dfs):
 			#------------------- Digitize dataframe --------------------
 			bin_cov = np.digitize(df[self.covariate].values,bins=edges)
@@ -85,32 +87,35 @@ class ClassifierQuality:
 				else:
 					idx = np.where(bin_cov == i)[0]
 
-				#------------- Insert probabilities -----------------------------
-				CM.loc[(j,i),"pro"] = np.linspace(0,1,num=prob_steps,endpoint=True)
-				#----------------------------------------------------------------
+				#-- Temporary dataframe --
+				tmp = df.iloc[idx].copy()
+				#-------------------------
 
-				#---- n_sources -------------
+				#-----------------------------------------------------
+				trues = tmp[self.true_class].to_numpy()
+				probs = tmp[self.variate].to_numpy()
+				TP = np.empty(prob_steps)
+				TN = np.empty(prob_steps)
+				FP = np.empty(prob_steps)
+				FN = np.empty(prob_steps)
+				for p,th in enumerate(thresholds):
+					TP[p] = np.logical_and(probs>=th, trues).sum()
+					TN[p] = np.logical_and(probs< th,~trues).sum()
+					FP[p] = np.logical_and(probs>=th,~trues).sum()
+					FN[p] = np.logical_and(probs< th, trues).sum()
+
+
+				#----- Insert values ------------
+				CM.loc[(j,i),"pro"] = thresholds
+				CM.loc[(j,i),"TP"]  = TP
+				CM.loc[(j,i),"TN"]  = TN
+				CM.loc[(j,i),"FP"]  = FP
+				CM.loc[(j,i),"FN"]  = FN
+				#-------------------------------
+
+				#---- n_sources --------------------
 				CM.loc[(j,i),"n_sources"] = len(idx)
-				#----------------------------
-
-				#---------- Positives and Negatives -------------------------------------------------
-				CM.loc[(j,i),"TP"] = CM["pro"].apply(lambda pro: np.sum(
-							(df[self.variate].iloc[idx] >= pro) &
-							 df[self.true_class].iloc[idx]
-							))
-
-				CM.loc[(j,i),"TN"] = CM["pro"].apply(lambda pro: np.sum(
-							(df[self.variate].iloc[idx] < pro)	&   
-							~df[self.true_class].iloc[idx]
-							))
-				CM.loc[(j,i),"FP"] = CM["pro"].apply(lambda pro: np.sum(
-							(df[self.variate].iloc[idx] >= pro) &  
-							~df[self.true_class].iloc[idx]
-							))
-				CM.loc[(j,i),"FN"] = CM["pro"].apply(lambda pro: np.sum(
-							(df[self.variate].iloc[idx] < pro)  &    
-							 df[self.true_class].iloc[idx]
-							))
+				#-----------------------------------
 
 		#---------- Metrics ------------------------------------------------------------------------
 		CM["CR"]  = 100.* CM["FP"] / (CM["FP"]+CM["TP"])
@@ -118,7 +123,7 @@ class ClassifierQuality:
 		CM["TPR"] = 100.* CM["TP"] / (CM["TP"]+CM["FN"])
 		CM["PPV"] = 100.* CM["TP"] / (CM["TP"]+CM["FP"])
 		CM["ACC"] = 100.* (CM["TP"] + CM["TN"]) / (CM["TP"]+CM["TN"]+CM["FP"]+CM["FN"])
-		CM["MCC"] = 100. * (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/\
+		CM["MCC"] = 100.* (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/\
 			np.sqrt((CM["TP"]+CM["FP"])*(CM["TP"]+CM["FN"])*(CM["TN"]+CM["FP"])*(CM["TN"]+CM["FN"]))
 		CM["DST"] = -1.0*np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
 		#-------------------------------------------------------------------------------------------
@@ -145,7 +150,6 @@ class ClassifierQuality:
 				#------------------ All Covariate values ----------------
 				optimum.insert(loc=0,column=self.covariate,value=np.nan)
 				optimum.insert(loc=0,column="Strategy",value="All")
-				# CM.insert(loc=0,column="Strategy",value="All")
 				#---------------------------------------------------------
 			else:
 				#------------ Bining strategy ------------------------------------------
@@ -157,7 +161,6 @@ class ClassifierQuality:
 				central.append(value)
 				optimum.insert(loc=0,column=self.covariate,value=value)
 				optimum.insert(loc=0,column="Strategy",value="Bin {0}".format(i))
-				# CM.insert(loc=0,column="Strategy",value="Bin {0}".format(i))
 				#-----------------------------------------------------------------------
 			#----------------------------------------------------------------------------
 
@@ -297,7 +300,8 @@ class ClassifierQuality:
 		tab.set_index("Strategy",inplace=True)
 
 		#-------------- Save as latex ---------------------------------
-		tab = tab.loc[:,[self.covariate,"pro","n_sources","TP","FP",
+		tab = tab.loc[:,[self.covariate,"pro","n_sources",
+						"TP","FP","TN","FN",
 						"TPR","CR","FPR","PPV","ACC","MCC","DST"]]
 		tab.to_latex(file_tex,column_format=13*"|c" + "|",
 						float_format="%.2f",na_rep="-",escape=False)
@@ -305,6 +309,8 @@ class ClassifierQuality:
 
 
 		#-------------- pickle ---------------------
-		quality = {"edges":self.edges,"thresholds":tab["pro"]}
+		quality = {"edges":self.edges,
+				   "thresholds":tab["pro"],
+				   "covariate":self.covariate}
 		with open(file_tex.replace(".tex",".pkl"), 'wb') as out_strm: 
 			dill.dump(quality, out_strm,protocol=2)
