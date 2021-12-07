@@ -120,7 +120,7 @@ class ClassifierQuality:
 		CM["ACC"] = 100.* (CM["TP"] + CM["TN"]) / (CM["TP"]+CM["TN"]+CM["FP"]+CM["FN"])
 		CM["MCC"] = 100. * (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/\
 			np.sqrt((CM["TP"]+CM["FP"])*(CM["TP"]+CM["FN"])*(CM["TN"]+CM["FP"])*(CM["TN"]+CM["FN"]))
-		CM["DST"] = -1.0*np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-1.0)**2)
+		CM["DST"] = -1.0*np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
 		#-------------------------------------------------------------------------------------------
 
 		#------------ Groupby------------------
