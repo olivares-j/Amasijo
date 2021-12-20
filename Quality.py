@@ -125,7 +125,10 @@ class ClassifierQuality:
 		CM["ACC"] = 100.* (CM["TP"] + CM["TN"]) / (CM["TP"]+CM["TN"]+CM["FP"]+CM["FN"])
 		CM["MCC"] = 100.* (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/\
 			np.sqrt((CM["TP"]+CM["FP"])*(CM["TP"]+CM["FN"])*(CM["TN"]+CM["FP"])*(CM["TN"]+CM["FN"]))
-		CM["DST"] = -1.0*np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
+		CM["F1M"] = 100.* CM["TP"] / (CM["TP"] + 0.5*(CM["FP"] + CM["FN"]))
+		CM["dCOT"] = -1.0*np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
+		CM["dROC"] = -1.0*np.sqrt((CM["FPR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
+		CM["dPRC"] = -1.0*np.sqrt((CM["PPV"]-100.0)**2 + (CM["TPR"]-100.0)**2)
 		#-------------------------------------------------------------------------------------------
 
 		#------------ Groupby------------------
@@ -180,14 +183,16 @@ class ClassifierQuality:
 		#============ Plots ==================================================
 		pdf = PdfPages(file_plot)
 
+		#------------------ Color bar and normalization ----------------
 		cmap = plt.get_cmap("jet")
 		norm = Normalize(vmin=self.vmin,vmax=self.vmax)
 		sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
 		sm.set_array([])
-
-		#-------------------- Colorbar --------------------------------------
-		ymin,ymax = 99.0,100.0
 		minor_ticks = np.delete(self.edges.copy(),np.argmin(self.edges))
+		#----------------------------------------------------------------
+
+		#======================= TPR and CR ================================
+		#-------------------- Colorbar --------------------------------------
 		fig, axs = plt.subplots(figsize=figsize)
 		divider = make_axes_locatable(axs)
 		# Add an axes above the main axes.
@@ -202,7 +207,7 @@ class ClassifierQuality:
 		cbar.ax.xaxis.set_ticks(minor_ticks, minor=True)		
 		#-----------------------------------------------------------------------------
 
-		#-------------------- TPR and CR ---------------------------------------------------------------
+		
 		for i,OP in enumerate(self.optima):
 			MU = self.quality_mu.loc[(i)]
 			SD = self.quality_sd.loc[(i)]
@@ -236,23 +241,16 @@ class ClassifierQuality:
 		axs.yaxis.set_minor_locator(MultipleLocator(5))
 		axs.set_ylabel("Quality indicator [%]")
 		axs.set_xlabel("Probability")
-		axs.legend(loc="center left",ncol=1)
+		axs.legend(loc="best",ncol=1)
 		pdf.savefig(bbox_inches="tight",dpi=dpi)
 		plt.close()
-		#-------------------------------------------------------------------------------
+		#=========================================================================================
 
-		#------------------------ Metrics ----------------------------------------------
-		fig, axs = plt.subplots(nrows=2, ncols=2, sharex=True,figsize=figsize)
+		#=========================== ROC & PRC ===================================================
+		fig, axs = plt.subplots(nrows=1, ncols=2, sharex=True,figsize=figsize)
 		plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=0.0)
 		#-------------------- Colorbar --------------------------------------
-		# ymin,ymax = 99.0,100.0
-		# minor_ticks = np.delete(self.edges.copy(),np.argmin(self.edges))
-		# fig, axs = plt.subplots(figsize=figsize)
-		# divider = make_axes_locatable(axs)
-		# Add an axes above the main axes.
-		# cax = divider.append_axes("top", size="7%", pad="2%")
 		cbar = fig.colorbar(sm, 
-							# cax=cax, 
 							ax = axs,
 							orientation="horizontal",
 							ticklocation="top",
@@ -264,7 +262,48 @@ class ClassifierQuality:
 		cbar.ax.xaxis.set_ticks(minor_ticks, minor=True)		
 		#-----------------------------------------------------------------------------
 
-		for ax,m in zip(axs.flatten(),["PPV","ACC","MCC","DST"]):
+		for ax,m,title in zip(axs.flatten(),[["FPR","TPR"],["TPR","PPV"]],["ROC","PRC"]):
+			for i,OP in enumerate(self.optima):
+				MU = self.quality_mu.loc[(i)]
+				SD = self.quality_sd.loc[(i)]
+				if i==0:
+					color   ="black"
+				else:
+					color   = cmap(norm(OP[self.covariate].values[0]))
+
+				ax.fill_between(MU[m[0]],MU[m[1]]-SD[m[1]],MU[m[1]]+SD[m[1]],
+								color=color,
+								zorder=0,alpha=0.2)
+				ax.plot(MU[m[0]],MU[m[1]],c=color,zorder=1)	
+				ax.scatter(OP[m[0]],OP[m[1]],color=color,marker="X",zorder=2)
+
+			ax.set_xlabel(m[0],labelpad=0)
+			ax.set_ylabel(m[1],labelpad=0)
+			ax.set_xlim(0,100.0)
+			ax.set_ylim(0,100.0)
+			ax.set_aspect("equal")
+			ax.set_title(title)
+		pdf.savefig(bbox_inches="tight",dpi=dpi)
+		plt.close()
+		#=========================================================================================
+
+		#========================= Metrics =======================================================
+		fig, axs = plt.subplots(nrows=3, ncols=2, sharex=True,figsize=figsize)
+		plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=0.0)
+		#-------------------- Colorbar --------------------------------------
+		cbar = fig.colorbar(sm, 
+							ax = axs,
+							orientation="horizontal",
+							ticklocation="top",
+							label=self.covariate,
+							ticks=self.central,
+							format='%.1f',
+							pad=0.07
+							)
+		cbar.ax.xaxis.set_ticks(minor_ticks, minor=True)		
+		#-----------------------------------------------------------------------------
+
+		for ax,m in zip(axs.flatten(),["F1M","ACC","MCC","dCOT","dROC","dPRC"]):
 			for i,OP in enumerate(self.optima):
 				MU = self.quality_mu.loc[(i)]
 				SD = self.quality_sd.loc[(i)]
@@ -280,18 +319,12 @@ class ClassifierQuality:
 				ax.scatter(OP["pro"],OP[m],color=color,marker="X",zorder=2)
 
 			ax.set_xlim(0,1.0)
-			# ax.set_xticks(np.arange(0,1,step=0.1))
-			# ax.xaxis.set_major_formatter(FormatStrFormatter('%1.1f'))
-			# ax.yaxis.set_major_locator(MultipleLocator(10))
-			# ax.yaxis.set_major_formatter(FormatStrFormatter('%d'))
-			# For the minor ticks, use no labels; default NullFormatter.
-			# ax.yaxis.set_minor_locator(MultipleLocator(5))
 			ax.set_ylabel(m,labelpad=0)
-		axs[1,0].set_xlabel("Probability")
-		axs[1,1].set_xlabel("Probability")
+		axs[2,0].set_xlabel("Probability")
+		axs[2,1].set_xlabel("Probability")
 		pdf.savefig(bbox_inches="tight",dpi=dpi)
 		plt.close()
-		#-------------------------------------------------------------------------------
+		#========================================================================================
 
 		pdf.close()
 
@@ -302,8 +335,8 @@ class ClassifierQuality:
 		#-------------- Save as latex ---------------------------------
 		tab = tab.loc[:,[self.covariate,"pro","n_sources",
 						"TP","FP","TN","FN",
-						"TPR","CR","FPR","PPV","ACC","MCC","DST"]]
-		tab.to_latex(file_tex,column_format=13*"|c" + "|",
+						"TPR","CR","FPR","PPV","ACC","F1M","MCC","dCOT","dROC","dPRC"]]
+		tab.to_latex(file_tex,column_format=17*"|c" + "|",
 						float_format="%.2f",na_rep="-",escape=False)
 		#--------------------------------------------------------------
 

@@ -4,6 +4,7 @@ import numpy  as np
 import pandas as pd
 import scipy.stats as st
 from time import time
+from subprocess import call
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
@@ -25,48 +26,40 @@ class Amasijo(object):
 		astrometric distributions and photometry from stellar models"""
 	def __init__(self,photometric_args,
 					astrometric_args=None,
-					mcluster_file=None,
+					mcluster_args=None,
 					kalkayotl_file=None,
 					seed=1234):
 
-		#------ Set Seed -----------------
+		#------ Set Seed -----------------------------------
 		np.random.seed(seed=seed)
 		self.random_state = np.random.RandomState(seed=seed)
-
-		#---------- Arguments --------------------------
-		self.astrometric_args = astrometric_args
-		self.photometric_args = photometric_args
-		self.mcluster_file    = mcluster_file
-		#---------------------------------------------
+		self.seed = seed
+		#---------------------------------------------------
 
 		#--------------- Tracks ----------------------------
 		self.tracks = get_ichrone('mist', tracks=True,
 						bands=photometric_args["bands"])
 		#---------------------------------------------------
 
-		#------- MCluster or not -------------------------------------------------
-		if self.mcluster_file is not None:
-			self.mcluster = True
-			print("Phase-space coordinates will be read from the MCluster file")
-		else:
-			self.mcluster = False
-		#-------------------------------------------------------------------------
+		#---------- Arguments ---------------------------------------------------------------
+		self.photometric_args = photometric_args
 
-		#----------- Kalkayotl file -------------------------------------------------------------
-		msg_kal = "Astrometric arguments will be superseeded by those from the Kalkayotl file!"
-		if kalkayotl_file is not None:
-			print(msg_kal)
+		if astrometric_args is not None:
+			self.astrometric_args = astrometric_args
+			case = "astrometric"
+		elif mcluster_args is not None:
+			self.mcluster_args = mcluster_args
+			case = "McLuster"
+		elif kalkayotl_file is not None:
 			assert os.path.exists(kalkayotl_file), "Input Kalkayotl file does not exists!"
 			self.astrometric_args = self._read_kalkayotl(kalkayotl_file)
-		#----------------------------------------------------------------------------------------
-
-		#------- MCluster or not -------------------------------------------------
-		if self.mcluster_file is not None:
-			self.mcluster = True
-			print("Phase-space coordinates will be read from the MCluster file")
+			case = "Kalkayotl"
 		else:
-			self.mcluster = False
-		#-------------------------------------------------------------------------
+			sys.exit("You must provide astrometric_args, mcluster_args or a Kalkayotl file!")
+
+		print("Astrometry will be generated from the provided {0} arguments!".format(case))
+		#-----------------------------------------------------------------------------------
+		
 
 		#------- Labels ----------------------------------------------------------------------------------
 		self.labels_phase_space = ["X","Y","Z","U","V","W"]
@@ -406,18 +399,10 @@ class Amasijo(object):
 
 	def read_mcluster(self,file):
 		''' Reads mcluster code input files '''
-		position_args = self.astrometric_args["position"]
-		velocity_args = self.astrometric_args["velocity"]
-
 		mc = pd.read_csv(file,sep="\t",header=None,skiprows=1,
 				names=sum([["Mass"],self.labels_phase_space],[]))
 		masses = mc["Mass"].to_numpy()
 		X = mc[self.labels_phase_space].to_numpy()
-
-		#-------- Shift positions and velocities ---
-		X[:,:3] += np.array(position_args["location"])
-		X[:,3:] += np.array(velocity_args["location"])
-		#-------------------------------------------
 
 		return masses,X
 
@@ -428,27 +413,62 @@ class Amasijo(object):
 						release='dr3',
 						m_factor=2):
 
-		if self.mcluster:
-			#--------------- Read mcluster file ----------------
-			print("Reading MCluster phase-space values ...")
-			masses,X = self.read_mcluster(file=self.mcluster_file)
-			m_stars = len(masses)
-			msg_error = "The mcluster_file contains less than {0}.".format(n_stars)
-			assert m_stars >= n_stars, msg_error
-			#---------------------------------------------------
+		#----- Number of stars ------------
+		m_stars = n_stars*m_factor
+
+		if hasattr(self,"mcluster_args"):
+			#--------------- Generate McLuster file ------------
+			path = self.mcluster_args["path"]
+			base_cmd = "{0}mcluster -f0 -s {1} -N {2} "
+			base_cmd = base_cmd.format(path,self.seed,m_stars)
+
+			if self.mcluster_args["family"] == "EFF":
+				rc = self.mcluster_args["core_radius"]
+				rt = self.mcluster_args["truncation_radius"]
+				g  = self.mcluster_args["gamma"]
+				name = "EFF_n{0}_r{1}_g{2}_c{3}"
+				args = "-P 3 -u 1 -r {0} -g {1} -c {2} -o {3}"
+				name = name.format(m_stars,rc,g,rt)
+				args = args.format(rc,g,rt,name)
+				cmd  = base_cmd + args
+
+			elif self.mcluster_args["family"] == "King":
+				rc = self.mcluster_args["core_radius"]
+				rt = self.mcluster_args["tidal_radius"]
+				w  = self.mcluster_args["W0"]
+				name = "King_n{0}_r{1}_w{3}"
+				args = "-P 1 -u 1 -r {0} -W {1} -c {2} -o {3}"
+				name = name.format(m_stars,rc,w)
+				args = args.format(rc,w,name)
+				cmd  = base_cmd + args
 			
-		else:
-			#------- Generate masses and phase-space ---------
-			m_stars = n_stars*m_factor
+			mcluster_file = "{0}/{1}.txt".format(os.getcwd(),name)
+			print("Running McLuster command:")
+			print(cmd)
+			call(cmd, shell=True)
+			#---------------------------------------------------
+
+			#--------------- Read mcluster file ----------------
+			print("Reading McLuster phase-space values ...")
+			_,X = self.read_mcluster(file=mcluster_file)
+			#--------------------------------------------------
+
+			#-------- Shift positions and velocities ------------------
+			X += np.array(mcluster_args["position+velocity"])
+			#----------------------------------------------------------
+			
+		elif hasattr(self,"astrometric_args"):
+
 			#---------- Phase space coordinates --------------
 			print("Generating phase-space values ...")
 			X = self._generate_phase_space(n_stars=m_stars)
 			#------------------------------------------------
 
-			#------------ Masses ------------------------------
-			# Sample from Chabrier prior
-			masses  = ChabrierPrior().sample(m_stars)
-			#--------------------------------------------------
+		#------------ Masses ------------------------------
+		# Sample from Chabrier prior
+		masses  = ChabrierPrior(bounds=[0.1,
+			self.photometric_args["mass_limit"]]).sample(m_stars)
+		#--------------------------------------------------
 
 		#---------- Phase-space ------------------------------------
 		df_ps = pd.DataFrame(data=X,columns=self.labels_phase_space)
@@ -466,11 +486,6 @@ class Amasijo(object):
 		#------- Assert valid masses -------------------------------
 		msg_error = "The number of sources with valid masses is" + \
 				   " smaller than n_stars.\n"
-
-		if self.mcluster:
-			msg_error += "Produce a mcluster file with more stars!"
-		else:
-			msg_error += "Increase m_factor!"
 
 		assert len(df_ph) >= n_stars, msg_error
 		#-----------------------------------------------------------
@@ -740,55 +755,43 @@ class Amasijo(object):
 
 if __name__ == "__main__":
 
-	dir_main      =  "/home/jolivares/Repos/Amasijo/Data/"
-	file_plot     = dir_main + "Gaussian_n100.pdf"
-	file_data     = dir_main + "Gaussian_n100.csv"
-	random_seeds  = [1]    # Random state for the synthetic data
-	n_stars       = 100
-	mcluster_file = None 
-
+	seed      = 1
+	n_stars   = 500
+	m_factor  = 2
+	dir_main  = "/home/jolivares/Repos/Amasijo/Data/"
+	base_name = "EFF_n{0}_r1_g5_s{1}".format(n_stars,seed)
+	file_plot = dir_main + base_name + ".pdf"
+	file_data = dir_main + base_name + ".csv"
+	
 	astrometric_args = {
-		"position":{
-				"family":"Gaussian",
-				"location":np.array([0.0,100.0,0.0]),
-				"covariance":np.diag([2.,2.,2.])
-			# "family":"EFF",
-			# 	"location":np.array([500.,500.,500.]),
-			# 	"covariance":np.eye(3)*10.0,
-			# 	"gamma":3.5
-			# "family":"King",
-			# 	"location":np.array([500.,500.,500.]),
-			# 	"covariance":np.eye(3)*10.0,
-			# 	"tidal_radius":5.
-			# "family":"GMM",
-			# 	"weights":np.array([0.4,0.6]),
-			# 	"location":[np.array([500.,500.,500.]),
-			# 		   np.array([550.,550.,550.])],
-			# 	"covariance":[np.eye(3)*10.0,np.eye(3)*20.0]
-			},
-		"velocity":{
-				"family":"Gaussian",
-				"location":np.array([0.0,0.0,0.0]),
-				"covariance":np.diag([1.,1.,1.])
-			}
-	}
+		"position":{"family":"Gaussian",
+					"location":np.array([0.0,100.0,0.0]),
+					"covariance":np.diag([2.,2.,2.])},
+		"velocity":{"family":"Gaussian",
+					"location":np.array([0.0,0.0,0.0]),
+					"covariance":np.diag([1.,1.,1.])}}
+
 	photometric_args = {
 		"log_age": 8.2,     # Solar metallicity
 		"metallicity":0.02, # Typical value of Bossini+2019
 		"Av": 0.0,          # No extinction
 		"mass_limit":4.0,   # Avoids NaNs in photometry
-		"bands":["V","I","G","BP","RP"]
-	}
+		"bands":["V","I","G","BP","RP"]}
 
-	for seed in random_seeds:
-		ama = Amasijo(astrometric_args=astrometric_args,
-					  photometric_args=photometric_args,
-					  mcluster_file=mcluster_file,
-					  seed=seed)
+	mcluster_args = {
+		"path":"/home/jolivares/Repos/mcluster/",
+		"family":"EFF","gamma":5.0,"core_radius":1.0,
+		"position+velocity":[0.0,100.0,0.0,0.0,0.0,0.0],
+		"truncation_radius":20.0}
 
-		ama.generate_cluster(file_data,n_stars=n_stars,m_factor=4)
+	ama = Amasijo(mcluster_args=mcluster_args,
+				  photometric_args=photometric_args,
+				  seed=seed)
 
-		ama.plot_cluster(file_plot=file_plot)
+	ama.generate_cluster(file_data,n_stars=n_stars,
+								m_factor=m_factor)
+
+	ama.plot_cluster(file_plot=file_plot)
 
 
 

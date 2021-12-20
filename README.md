@@ -13,3 +13,5 @@ Follow the next steps:
 3. Install [isochrones](https://github.com/timothydmorton/isochrones)
 
 4. Install [Kalkayotl](https://github.com/olivares-j/Kalkayotl) 2.0
+
+5. Install [McLuster](https://github.com/ahwkuepper/mcluster)
