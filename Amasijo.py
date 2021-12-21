@@ -7,6 +7,7 @@ from time import time
 from subprocess import call
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from scipy.interpolate import splrep,splev
 
 from Functions import AngularSeparation,covariance_parallax,covariance_proper_motion
 from distributions import mveff,mvking
@@ -228,20 +229,44 @@ class Amasijo(object):
 
 		return df_as,r
 
-	def _generate_true_photometry(self,masses,distances):
-		#------- Obtains photometry --------------------------------
-		df_ph = self.tracks.generate(masses, 
+	def _generate_true_photometry(self,masses,distances,mass_lower_limit=0.1):
+
+		idx_iso = np.where(masses >= mass_lower_limit)[0]
+		idx_ext = np.where(masses <  mass_lower_limit)[0]
+
+		#------- Obtains photometry -------------------------------------
+		df_ph = self.tracks.generate(masses[idx_iso], 
 									self.photometric_args["log_age"], 
 									self.photometric_args["metallicity"], 
-									distance=distances, 
+									distance=distances[idx_iso], 
 									AV=self.photometric_args["Av"])
-		#-----------------------------------------------------------
-
-		#----------- Gaia limit ----------------------------------
-		df_ph.drop(df_ph[df_ph["G_mag"] > 21].index, inplace=True)
+		#-----------------------------------------------------------------
 
 		#--------- Drop missing values --------------------
 		df_ph.dropna(subset=["G_mag"],inplace=True)
+		#-------------------------------------------
+
+		#--------- Sort data -----------------------------
+		df_ph.sort_values(by="initial_mass",inplace=True)
+		#-------------------------------------------------
+
+		#------------ Extrapolation ---------------------------------
+		if len(idx_ext) > 0:
+			data = {"initial_mass":masses[idx_ext],
+					"distance":distances[idx_ext]}
+			for mag in ["V_mag","I_mag","G_mag","BP_mag","RP_mag"]:
+				tck,fp,ier,msg = splrep(x=df_ph["initial_mass"],
+										y=df_ph[mag],
+										k=1,
+										full_output=True)
+				data[mag] = splev(data["initial_mass"],tck)
+			df_ph = pd.concat([df_ph,pd.DataFrame(data=data)],
+											ignore_index=True)
+		#-------------------------------------------------------------
+
+		#----------- Gaia limit ----------------------------------
+		df_ph.drop(df_ph[df_ph["G_mag"] > 21].index, inplace=True)
+		#--------------------------------------------------------
 
 		return df_ph
 	#======================================================================================
@@ -466,8 +491,9 @@ class Amasijo(object):
 
 		#------------ Masses ------------------------------
 		# Sample from Chabrier prior
-		masses  = ChabrierPrior(bounds=[0.1,
-			self.photometric_args["mass_limit"]]).sample(m_stars)
+		masses  = ChabrierPrior(
+				bounds=self.photometric_args["mass_limits"]
+					).sample(m_stars)
 		#--------------------------------------------------
 
 		#---------- Phase-space ------------------------------------
@@ -498,11 +524,12 @@ class Amasijo(object):
 		df_true = df_true.sample(n=n_stars)
 		#--------------------------------------------
 
-		#------------- Observed values ---------------------------------------
+		#------------- Observed values ----------------------------
 		print("Generating observed values ...")
 		df_obs = self._generate_observed_values(df_true,
 						release=release,
 						angular_correlations=angular_correlations)
+		#----------------------------------------------------------
 
 		#-------- Join data frames -----------------------------
 		self.df = df_obs.join(df_true).join(df_ps)
@@ -691,6 +718,14 @@ class Amasijo(object):
 		plt.close()
 		#--------------------------------------------------
 
+		#------------- Mass -------------
+		plt.figure(figsize=figsize)
+		plt.hist(self.df["mass"],bins=50)
+		plt.xlabel("Mass [$M_{\\odot}$]")
+		pdf.savefig(bbox_inches='tight')
+		plt.close()
+		#-----------------------------------------------------
+
 		#----------- CMDs -----------------------------------
 		plt.figure(figsize=figsize)
 		plt.scatter(self.df["bp"]-self.df["rp"],
@@ -775,7 +810,7 @@ if __name__ == "__main__":
 		"log_age": 8.2,     # Solar metallicity
 		"metallicity":0.02, # Typical value of Bossini+2019
 		"Av": 0.0,          # No extinction
-		"mass_limit":4.0,   # Avoids NaNs in photometry
+		"mass_limits":[0.05,4.0],   # Avoids NaNs in photometry
 		"bands":["V","I","G","BP","RP"]}
 
 	mcluster_args = {
@@ -784,7 +819,8 @@ if __name__ == "__main__":
 		"position+velocity":[0.0,100.0,0.0,0.0,0.0,0.0],
 		"truncation_radius":20.0}
 
-	ama = Amasijo(mcluster_args=mcluster_args,
+	ama = Amasijo(astrometric_args=astrometric_args,
+				  mcluster_args=mcluster_args,
 				  photometric_args=photometric_args,
 				  seed=seed)
 
