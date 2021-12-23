@@ -80,27 +80,90 @@ class Amasijo(object):
 		#--------------------------------------------------------------------------------------------
 
 	def _read_kalkayotl(self,file):
+		#-------- Read file ----------------------------------
 		param = pd.read_csv(file,usecols=["Parameter","mode"])
+		#-----------------------------------------------------
 
-		#---- Extract parameters ------------------------------------------------
-		loc  = param.loc[param["Parameter"].str.contains("loc"),"mode"].values
-		param.fillna(value=1.0,inplace=True)
-		stds = param.loc[param["Parameter"].str.contains('stds'),"mode"].values
-		corr = param.loc[param["Parameter"].str.contains('corr'),"mode"].values
-		#------------------------------------------------------------------------
+		if any(param["Parameter"].str.contains("weights")):
+			#===================== GMM ==============================================
 
-		#---- Construct covariance --------------
-		stds = np.diag(stds)
-		corr = np.reshape(corr,(6,6))
-		cov  = np.dot(stds,corr.dot(stds))
-		#-----------------------------------------
+			#--------- Weights -------------------------------------------------------
+			wghs = param.loc[param["Parameter"].str.contains("weights"),"mode"].values
+			#------------------------------------------------------------------------
 
-		astrometric_args = {
-		"position+velocity":{
-				"family":"Gaussian",
-				"location":loc,
-				"covariance":cov}
-			}
+			#------------- Location ----------------------------------
+			loc = param[param["Parameter"].str.contains("loc")]
+
+			locs = []
+			for i in range(len(wghs)):
+				selection = loc["Parameter"].str.contains(
+							"[{0}]".format(i),regex=False)
+				locs.append(loc.loc[selection,"mode"].values)
+			#---------------------------------------------------------
+
+			#------------- Covariances -----------------------
+			scl = param.fillna(value=1.0)
+
+			stds = []
+			cors = []
+			covs = []
+			for i in range(len(wghs)):
+				#---------- Select component parameters --------
+				mask_std = scl["Parameter"].str.contains(
+							"{0}_stds".format(i),regex=False)
+				mask_cor = scl["Parameter"].str.contains(
+							"{0}_corr".format(i),regex=False)
+				#-----------------------------------------------
+
+				#------Extract parameters -------------------
+				std = scl.loc[mask_std,"mode"].values
+				cor = scl.loc[mask_cor,"mode"].values
+				#--------------------------------------------
+
+				stds.append(std)
+
+				#---- Construct covariance --------------
+				std = np.diag(std)
+				cor = np.reshape(cor,(6,6))
+				cov = np.dot(std,cor.dot(std))
+				#-----------------------------------------
+
+				#--- Append -------
+				cors.append(cor)
+				covs.append(cov)
+				#------------------
+			#-------------------------------------------------
+
+			astrometric_args = {
+			"position+velocity":{
+					"family":"GMM",
+					"weights":wghs,
+					"location":locs,
+					"covariance":covs}
+				}
+			#========================================================================
+		else:
+			#=================== Gaussian ===========================================
+			#---- Extract parameters ------------------------------------------------
+			loc  = param.loc[param["Parameter"].str.contains("loc"),"mode"].values
+			param.fillna(value=1.0,inplace=True)
+			stds = param.loc[param["Parameter"].str.contains('stds'),"mode"].values
+			corr = param.loc[param["Parameter"].str.contains('corr'),"mode"].values
+			#------------------------------------------------------------------------
+
+			#---- Construct covariance --------------
+			stds = np.diag(stds)
+			corr = np.reshape(corr,(6,6))
+			cov  = np.dot(stds,corr.dot(stds))
+			#-----------------------------------------
+
+			astrometric_args = {
+			"position+velocity":{
+					"family":"Gaussian",
+					"location":loc,
+					"covariance":cov}
+				}
+			#==========================================================================
 
 		return astrometric_args
 
@@ -229,44 +292,28 @@ class Amasijo(object):
 
 		return df_as,r
 
-	def _generate_true_photometry(self,masses,distances,mass_lower_limit=0.1):
-
-		idx_iso = np.where(masses >= mass_lower_limit)[0]
-		idx_ext = np.where(masses <  mass_lower_limit)[0]
-
+	def _generate_true_photometry(self,masses,distances):
 		#------- Obtains photometry -------------------------------------
-		df_ph = self.tracks.generate(masses[idx_iso], 
+		df_ph = self.tracks.generate(masses, 
 									self.photometric_args["log_age"], 
 									self.photometric_args["metallicity"], 
-									distance=distances[idx_iso], 
+									distance=distances, 
 									AV=self.photometric_args["Av"])
 		#-----------------------------------------------------------------
 
-		#--------- Drop missing values --------------------
-		df_ph.dropna(subset=["G_mag"],inplace=True)
-		#-------------------------------------------
+		#------- Assert valid masses ----------------------------------------
+		idx = np.where((df_ph["G_mag"] > 21) | np.isnan(df_ph["G_mag"]))[0]
 
-		#--------- Sort data -----------------------------
-		df_ph.sort_values(by="initial_mass",inplace=True)
-		#-------------------------------------------------
+		if len(idx) > 0:
+			bad = masses[idx]
+			msg_error = "ERROR: Modify the mass interval!\n" + \
+			"Stars are being generated outside the Gaia \n" +\
+			"or MIST photometric limits!\n" +\
+			"The valid mass lower limit for MIST is 0.1 Msun.\n" +\
+			"Bad masses have the following values: Min.: {0:1.2f}, Max.:{1:2.1f}"
 
-		#------------ Extrapolation ---------------------------------
-		if len(idx_ext) > 0:
-			data = {"initial_mass":masses[idx_ext],
-					"distance":distances[idx_ext]}
-			for mag in ["V_mag","I_mag","G_mag","BP_mag","RP_mag"]:
-				tck,fp,ier,msg = splrep(x=df_ph["initial_mass"],
-										y=df_ph[mag],
-										k=1,
-										full_output=True)
-				data[mag] = splev(data["initial_mass"],tck)
-			df_ph = pd.concat([df_ph,pd.DataFrame(data=data)],
-											ignore_index=True)
-		#-------------------------------------------------------------
-
-		#----------- Gaia limit ----------------------------------
-		df_ph.drop(df_ph[df_ph["G_mag"] > 21].index, inplace=True)
-		#--------------------------------------------------------
+			sys.exit(msg_error.format(bad.min(),bad.max()))
+		#--------------------------------------------------------------------
 
 		return df_ph
 	#======================================================================================
@@ -435,17 +482,13 @@ class Amasijo(object):
 	def generate_cluster(self,file,n_stars=100,
 						angular_correlations="Vasiliev+2019",
 						index_label="source_id",
-						release='dr3',
-						m_factor=2):
-
-		#----- Number of stars ------------
-		m_stars = n_stars*m_factor
+						release='dr3'):
 
 		if hasattr(self,"mcluster_args"):
 			#--------------- Generate McLuster file ------------
 			path = self.mcluster_args["path"]
 			base_cmd = "{0}mcluster -f0 -s {1} -N {2} "
-			base_cmd = base_cmd.format(path,self.seed,m_stars)
+			base_cmd = base_cmd.format(path,self.seed,n_stars)
 
 			if self.mcluster_args["family"] == "EFF":
 				rc = self.mcluster_args["core_radius"]
@@ -453,7 +496,7 @@ class Amasijo(object):
 				g  = self.mcluster_args["gamma"]
 				name = "EFF_n{0}_r{1}_g{2}_c{3}"
 				args = "-P 3 -u 1 -r {0} -g {1} -c {2} -o {3}"
-				name = name.format(m_stars,rc,g,rt)
+				name = name.format(n_stars,rc,g,rt)
 				args = args.format(rc,g,rt,name)
 				cmd  = base_cmd + args
 
@@ -463,7 +506,7 @@ class Amasijo(object):
 				w  = self.mcluster_args["W0"]
 				name = "King_n{0}_r{1}_w{3}"
 				args = "-P 1 -u 1 -r {0} -W {1} -c {2} -o {3}"
-				name = name.format(m_stars,rc,w)
+				name = name.format(n_stars,rc,w)
 				args = args.format(rc,w,name)
 				cmd  = base_cmd + args
 			
@@ -486,14 +529,14 @@ class Amasijo(object):
 
 			#---------- Phase space coordinates --------------
 			print("Generating phase-space values ...")
-			X = self._generate_phase_space(n_stars=m_stars)
+			X = self._generate_phase_space(n_stars=n_stars)
 			#------------------------------------------------
 
 		#------------ Masses ------------------------------
 		# Sample from Chabrier prior
 		masses  = ChabrierPrior(
 				bounds=self.photometric_args["mass_limits"]
-					).sample(m_stars)
+					).sample(n_stars)
 		#--------------------------------------------------
 
 		#---------- Phase-space ------------------------------------
@@ -509,20 +552,9 @@ class Amasijo(object):
 		df_ph = self._generate_true_photometry(masses,distances)
 		#---------------------------------------------------------
 
-		#------- Assert valid masses -------------------------------
-		msg_error = "The number of sources with valid masses is" + \
-				   " smaller than n_stars.\n"
-
-		assert len(df_ph) >= n_stars, msg_error
-		#-----------------------------------------------------------
-
 		#---- Join true values ----------------
 		df_true = df_as.join(df_ph,how="inner")
 		#--------------------------------------
-
-		#--- Sample the desired number of sources ---
-		df_true = df_true.sample(n=n_stars)
-		#--------------------------------------------
 
 		#------------- Observed values ----------------------------
 		print("Generating observed values ...")
@@ -791,10 +823,10 @@ class Amasijo(object):
 if __name__ == "__main__":
 
 	seed      = 1
-	n_stars   = 500
-	m_factor  = 2
-	dir_main  = "/home/jolivares/Repos/Amasijo/Data/"
-	base_name = "EFF_n{0}_r1_g5_s{1}".format(n_stars,seed)
+	n_stars   = 1000
+	dir_main  = "/home/jolivares/Cumulos/ComaBer/Kalkayotl/mecayotl/iter_0/GMM_central/"
+	# dir_main  = "/home/jolivares/Cumulos/ComaBer/Kalkayotl/Furnkranz+2019/Gaussian_central/"
+	base_name = "ComaBer_n{0}".format(n_stars)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
 	
@@ -807,11 +839,12 @@ if __name__ == "__main__":
 					"covariance":np.diag([1.,1.,1.])}}
 
 	photometric_args = {
-		"log_age": 8.2,     # Solar metallicity
-		"metallicity":0.02, # Typical value of Bossini+2019
-		"Av": 0.0,          # No extinction
-		"mass_limits":[0.05,4.0],   # Avoids NaNs in photometry
-		"bands":["V","I","G","BP","RP"]}
+						"log_age": 8.47,    
+						"metallicity":0.012,
+						"Av": 0.0,         
+						"mass_limits":[0.1,3.5], 
+						"bands":["V","I","G","BP","RP"]
+						}
 
 	mcluster_args = {
 		"path":"/home/jolivares/Repos/mcluster/",
@@ -819,13 +852,16 @@ if __name__ == "__main__":
 		"position+velocity":[0.0,100.0,0.0,0.0,0.0,0.0],
 		"truncation_radius":20.0}
 
-	ama = Amasijo(astrometric_args=astrometric_args,
-				  mcluster_args=mcluster_args,
-				  photometric_args=photometric_args,
-				  seed=seed)
+	kalkayotl_file = dir_main + "Cluster_statistics.csv"
 
-	ama.generate_cluster(file_data,n_stars=n_stars,
-								m_factor=m_factor)
+	ama = Amasijo(
+				# astrometric_args=astrometric_args,
+				# mcluster_args=mcluster_args,
+				kalkayotl_file=kalkayotl_file,
+				photometric_args=photometric_args,
+				seed=seed)
+
+	ama.generate_cluster(file_data,n_stars=n_stars)
 
 	ama.plot_cluster(file_plot=file_plot)
 
