@@ -52,7 +52,7 @@ class ClassifierQuality:
 		self.vmax = self.df[covariate].max()
 
 
-	def confusion_matrix(self,bins=5,prob_steps=100,metric="ACC"):
+	def confusion_matrix(self,bins=5,prob_steps=100,metric="ACC",contamination_rate=None):
 		''' Compute the confusion matrix on a grid of prob_steps for each bin of the covariate'''
 
 		#------- Split data frame into bins ---------------------
@@ -142,7 +142,19 @@ class ClassifierQuality:
 		central = []
 		for i in range(len(edges)+1):
 			#---------------- Identify optimum ------------------------------
-			idx_opt = np.nanargmax(quality_mean.loc[(i),metric].to_numpy())
+			if contamination_rate is None:
+				#------------ Metric ------------------------------------------
+				idx_opt = np.nanargmax(quality_mean.loc[(i),metric].to_numpy())
+				#---------------------------------------------------------------
+			else:
+				#------------ Contamination rate ------------------------------
+				idx_opt = np.nanargmin(
+						  np.abs(quality_mean.loc[(i),"CR"].to_numpy() - 
+						  contamination_rate))
+				#-------------------------------------------------------------
+			#------------------------------------------------------------------
+
+			#------------ Extract ---------------------------------------------
 			optimum_mu = quality_mean.loc[[(i,idx_opt)]]
 			optimum_sd = quality_mean.loc[[(i,idx_opt)]]
 			optimum    = optimum_mu.merge(optimum_sd,suffixes=("","_sd"))
