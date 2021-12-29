@@ -71,7 +71,7 @@ class ClassifierQuality:
 							columns=["pro"],index=index)
 		#----------------------------------------------------------------------------------
 
-		thresholds =  np.linspace(0,0.999,num=prob_steps,endpoint=True)
+		thresholds =  np.linspace(0,1.0,num=prob_steps,endpoint=True)
 
 		#------------------------- Loop over dataframes -------------------------------------
 		for j,df in enumerate(self.dfs):
