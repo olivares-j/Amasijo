@@ -50,14 +50,14 @@ class ClassifierQuality:
 
 		#--------- Trim df according to covariate_limits -------
 		if isinstance(covariate_limits,list):
-			mask_valid = self.df[covariate] > covariate_limits[0] & \
-			             self.df[covariate] < covariate_limits[1]
+			mask_valid = (self.df[covariate] > covariate_limits[0]) & \
+			             (self.df[covariate] < covariate_limits[1])
 			self.df = self.df[mask_valid]
 
 			list_dfs = []
 			for df in self.dfs:
-				mask_valid = df[covariate] > covariate_limits[0] & \
-			             	 df[covariate] < covariate_limits[1]
+				mask_valid = (df[covariate] > covariate_limits[0]) & \
+			             	 (df[covariate] < covariate_limits[1])
 				list_dfs.append(df[mask_valid])
 
 			self.dfs = list_dfs
