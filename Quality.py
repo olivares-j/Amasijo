@@ -14,7 +14,7 @@ from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 
 class ClassifierQuality:
 	"""This class analyses the classifiers as function of probability and covariate"""
-	def __init__(self,file_data,variate,covariate,true_class):
+	def __init__(self,file_data,variate,covariate,true_class,covariate_limits=None):
 		self.covariate  = covariate
 		self.variate    = variate
 		self.true_class = true_class
@@ -47,6 +47,21 @@ class ClassifierQuality:
 
 		else:
 			sys.exit(error_message)
+
+		#--------- Trim df according to covariate_limits -------
+		if isinstance(covariate_limits,list):
+			mask_valid = self.df[covariate] > covariate_limits[0] \
+			             self.df[covariate] < covariate_limits[1]
+			self.df = self.df[mask_valid]
+
+			list_dfs = []
+			for df in self.dfs:
+				mask_valid = df[covariate] > covariate_limits[0] \
+			             	 df[covariate] < covariate_limits[1]
+				list_dfs.append(df[mask_valid])
+
+			self.dfs = list_dfs
+		#-------------------------------------------------------
 
 		self.vmin = self.df[covariate].min()
 		self.vmax = self.df[covariate].max()
