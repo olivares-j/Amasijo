@@ -85,7 +85,7 @@ class Amasijo(object):
 		#-----------------------------------------------------
 
 		if any(param["Parameter"].str.contains("weights")):
-			#===================== GMM ==============================================
+			#===================== GMM and CGMM =======================================
 
 			#--------- Weights -------------------------------------------------------
 			wghs = param.loc[param["Parameter"].str.contains("weights"),"mode"].values
@@ -94,12 +94,22 @@ class Amasijo(object):
 			#------------- Location ----------------------------------
 			loc = param[param["Parameter"].str.contains("loc")]
 
-			locs = []
-			for i in range(len(wghs)):
-				selection = loc["Parameter"].str.contains(
-							"[{0}]".format(i),regex=False)
-				locs.append(loc.loc[selection,"mode"].values)
-			#---------------------------------------------------------
+
+			if loc.shape[0]/len(wghs) == 6:
+				#------------- GMM ------------------------------------
+				family = "GMM"
+				locs = []
+				for i in range(len(wghs)):
+					selection = loc["Parameter"].str.contains(
+								"[{0}]".format(i),regex=False)
+					locs.append(loc.loc[selection,"mode"].values)
+				#---------------------------------------------------------
+			else:
+				#-------------- CGMM -------------------------------------------------
+				family = "CGMM"
+				loc = param.loc[param["Parameter"].str.contains("loc"),"mode"].values
+				locs = [loc for w in wghs]
+				#---------------------------------------------------------------------
 
 			#------------- Covariances -----------------------
 			scl = param.fillna(value=1.0)
@@ -136,7 +146,7 @@ class Amasijo(object):
 
 			astrometric_args = {
 			"position+velocity":{
-					"family":"GMM",
+					"family":family,
 					"weights":wghs,
 					"location":locs,
 					"covariance":covs}
@@ -181,7 +191,7 @@ class Amasijo(object):
 							cov=join_args["covariance"],
 							size=n_stars)
 
-			elif self.astrometric_args["position+velocity"]["family"] == "GMM":
+			elif self.astrometric_args["position+velocity"]["family"] in ["GMM", "CGMM"]:
 				assert np.sum(join_args["weights"]) == 1.0,"weights must be a simplex"
 				n_cmp = len(join_args["weights"])
 				n_stars_cmp = np.floor(join_args["weights"]*n_stars).astype('int')
@@ -824,7 +834,7 @@ if __name__ == "__main__":
 
 	seed      = 1
 	n_stars   = 1000
-	dir_main  = "/home/jolivares/Cumulos/ComaBer/Kalkayotl/mecayotl/iter_0/GMM_central/"
+	dir_main  = "/home/jolivares/Cumulos/ComaBer/Kalkayotl/mecayotl/iter_0/CGMM_central/"
 	# dir_main  = "/home/jolivares/Cumulos/ComaBer/Kalkayotl/Furnkranz+2019/Gaussian_central/"
 	base_name = "ComaBer_n{0}".format(n_stars)
 	file_plot = dir_main + base_name + ".pdf"
