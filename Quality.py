@@ -66,6 +66,11 @@ class ClassifierQuality:
 		self.vmin = self.df[covariate].min()
 		self.vmax = self.df[covariate].max()
 
+		pmin = self.df[variate].min()
+		pmax = self.df[variate].max()
+
+		assert pmin >= 0.0 and pmin < 1.0,"Probability minimum {0:1.2f}".format(pmin)
+		assert pmax <= 1.0 and pmax > 0.0,"Probability maximum {0:1.2f}".format(pmax)
 
 	def confusion_matrix(self,bins=5,prob_steps=100,metric="ACC",contamination_rate=None):
 		''' Compute the confusion matrix on a grid of prob_steps for each bin of the covariate'''
@@ -106,9 +111,23 @@ class ClassifierQuality:
 				tmp = df.iloc[idx].copy()
 				#-------------------------
 
-				#-----------------------------------------------------
+				#---------------------------------------
 				trues = tmp[self.true_class].to_numpy()
 				probs = tmp[self.variate].to_numpy()
+				#---------------------------------------
+
+				#-------- Verify true classes in bin ----------------------
+				if i == max(bin_cov):
+					bounds = "[{0},)".format(edges[i-1])
+				else:
+					bounds = "[{0},{1}]".format(edges[i-1],edges[i])
+				msg = "class in bin {0} of DataFrame {1}".format(bounds,j)
+
+				assert np.sum( trues) >= 1, "No True  "+msg
+				assert np.sum(~trues) >= 1, "No False "+msg
+				#----------------------------------------------------------
+
+				#---------------------------------------------------
 				TP = np.empty(prob_steps)
 				TN = np.empty(prob_steps)
 				FP = np.empty(prob_steps)
@@ -159,13 +178,23 @@ class ClassifierQuality:
 			#---------------- Identify optimum ------------------------------
 			if contamination_rate is None:
 				#------------ Metric ------------------------------------------
-				idx_opt = np.nanargmax(quality_mean.loc[(i),metric].to_numpy())
+				try:
+					idx_opt = np.nanargmax(quality_mean.loc[(i),metric].to_numpy())
+				except ValueError as e:
+					print("Error in bin {0}".format(i))
+					print(quality_mean.loc[(i)])
+					raise e
 				#---------------------------------------------------------------
 			else:
 				#------------ Contamination rate ------------------------------
-				idx_opt = np.nanargmin(
+				try:
+					idx_opt = np.nanargmin(
 						  np.abs(quality_mean.loc[(i),"CR"].to_numpy() - 
 						  contamination_rate))
+				except ValueError as e:
+					print("Error in bin {0}".format(i))
+					print(quality_mean.loc[(i)])
+					raise e
 				#-------------------------------------------------------------
 			#------------------------------------------------------------------
 
