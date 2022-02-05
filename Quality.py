@@ -112,19 +112,24 @@ class ClassifierQuality:
 				#-------------------------
 
 				#---------------------------------------
-				trues = tmp[self.true_class].to_numpy()
+				trues = tmp[self.true_class].to_numpy(dtype=bool)
 				probs = tmp[self.variate].to_numpy()
 				#---------------------------------------
 
 				#-------- Verify true classes in bin ----------------------
-				if i == max(bin_cov):
-					bounds = "[{0},)".format(edges[i-1])
+				if i == 0:
+					bounds = "[{0:2.1f},{1:2.1f}]".format(self.vmin,self.vmax)
+				elif i == max(bin_cov):
+					bounds = "[{0:2.1f},{1:2.1f}]".format(edges[i-1],self.vmax)
 				else:
-					bounds = "[{0},{1}]".format(edges[i-1],edges[i])
-				msg = "class in bin {0} of DataFrame {1}".format(bounds,j)
+					bounds = "[{0:2.1f},{1:2.1f}]".format(edges[i-1],edges[i])
 
-				assert np.sum( trues) >= 1, "No True  "+msg
-				assert np.sum(~trues) >= 1, "No False "+msg
+				msg = "class in bin {0} of DataFrame {1}".format(bounds,j)
+				# mbn = "\nMin: {0:2.2f}, Max: {1:2.2f}".format(
+				# 		tmp[self.covariate].min(),tmp[self.covariate].max())
+
+				assert np.sum( trues) >= 1, "No True  " + msg 
+				assert np.sum(~trues) >= 1, "No False " + msg
 				#----------------------------------------------------------
 
 				#---------------------------------------------------
