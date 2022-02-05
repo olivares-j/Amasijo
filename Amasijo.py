@@ -543,10 +543,17 @@ class Amasijo(object):
 			#------------------------------------------------
 
 		#------------ Masses ------------------------------
-		# Sample from Chabrier prior
-		masses  = ChabrierPrior(
-				bounds=self.photometric_args["mass_limits"]
-					).sample(n_stars)
+		if self.photometric_args["mass_prior"] == "Chabrier":
+			masses  = ChabrierPrior(
+					bounds=self.photometric_args["mass_limits"]
+						).sample(n_stars)
+		elif self.photometric_args["mass_prior"] == "Uniform":
+			masses = np.random.uniform(
+				low=self.photometric_args["mass_limits"][0],
+				high=self.photometric_args["mass_limits"][1],
+				size=n_stars)
+		else:
+			sys.exit("Photometric prior not implemented")
 		#--------------------------------------------------
 
 		#---------- Phase-space ------------------------------------
@@ -849,11 +856,12 @@ if __name__ == "__main__":
 					"covariance":np.diag([1.,1.,1.])}}
 
 	photometric_args = {
-						"log_age": 8.47,    
+						"log_age": 8.845,    
 						"metallicity":0.012,
 						"Av": 0.0,         
-						"mass_limits":[0.1,3.5], 
-						"bands":["V","I","G","BP","RP"]
+						"mass_limits":[0.1,2.6], 
+						"bands":["V","I","G","BP","RP"],
+						"mass_prior":"Uniform"
 						}
 
 	mcluster_args = {
