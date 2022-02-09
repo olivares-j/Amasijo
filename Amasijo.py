@@ -302,14 +302,53 @@ class Amasijo(object):
 
 		return df_as,r
 
-	def _generate_true_photometry(self,masses,distances):
-		#------- Obtains photometry -------------------------------------
-		df_ph = self.tracks.generate(masses, 
+	def _generate_true_photometry(self,masses,distances,mist_lower_mass=0.1):
+		#-------- Split --------------------------------
+		idx_mist  = np.where(masses >= mist_lower_mass)[0]
+		idx_faint = np.where(masses <  mist_lower_mass)[0]
+		n_faint   = len(idx_faint)
+		#-----------------------------------------------
+
+		#------- MIST photometry -----------------------------------------
+		df_ph_mist = self.tracks.generate(masses[idx_mist], 
 									self.photometric_args["log_age"], 
 									self.photometric_args["metallicity"], 
-									distance=distances, 
+									distance=distances[idx_mist], 
 									AV=self.photometric_args["Av"])
 		#-----------------------------------------------------------------
+
+		#------- Faint photometry ---------------------------------------
+		if n_faint > 0:
+			print("Warning: objects with mass lower than MIST mass " +\
+							"limit will have wrong photometry!!!!!")
+
+			#--------- Minimal mass -----------------------
+			idx_limit = np.argmin(df_ph_mist["mass"])
+			df_limit  = df_ph_mist.iloc[[idx_limit]].copy()
+			#---------------------------------------------
+
+			#----- Maximum mist G band ---------
+			mist_lower_mag = df_limit["G_mag"]
+			#-----------------------------------
+
+			#--------------Repeat n_faint times -----------------------
+			df_ph_faint = pd.concat([df_limit for n in range(n_faint)],
+									ignore_index=True)
+			#---------------------------------------------------------
+
+			#--------- Replace G values --------------------
+			df_ph_faint.loc[:,"G_mag"] = np.random.uniform(
+								low=mist_lower_mag,
+								high=21.0,
+								size=n_faint)
+			#-----------------------------------------------
+
+			#--------- Append ---------------------------------------
+			df_ph = df_ph_mist.append(df_ph_faint,ignore_index=True)
+			#--------------------------------------------------------
+
+		else:
+			df_ph = df_ph_mist
 
 		#------- Assert valid masses ----------------------------------------
 		idx = np.where((df_ph["G_mag"] > 21) | np.isnan(df_ph["G_mag"]))[0]
@@ -317,8 +356,8 @@ class Amasijo(object):
 		if len(idx) > 0:
 			bad = masses[idx]
 			msg_error = "ERROR: Modify the mass interval!\n" + \
-			"Stars are being generated outside the Gaia \n" +\
-			"or MIST photometric limits!\n" +\
+			"Stars are being generated below the Gaia limit\n" +\
+			"or above MIST photometric limits!\n" +\
 			"The valid mass lower limit for MIST is 0.1 Msun.\n" +\
 			"Bad masses have the following values: Min.: {0:1.2f}, Max.:{1:2.1f}"
 
@@ -859,7 +898,7 @@ if __name__ == "__main__":
 						"log_age": 8.845,    
 						"metallicity":0.012,
 						"Av": 0.0,         
-						"mass_limits":[0.1,2.6], 
+						"mass_limits":[0.01,2.6], 
 						"bands":["V","I","G","BP","RP"],
 						"mass_prior":"Uniform"
 						}
