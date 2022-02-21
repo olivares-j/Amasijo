@@ -62,6 +62,8 @@ class ClassifierQuality:
 			self.dfs = list_dfs
 		#-------------------------------------------------------
 
+		self.Ndf  = len(self.dfs)
+
 		self.vmin =  np.inf
 		self.vmax = -np.inf
 		
@@ -91,16 +93,24 @@ class ClassifierQuality:
 			edges = np.array(bins)
 		else:
 			sys.exit("Bins must be integer or list!")
+
+		nbins = len(edges) + 1
 		#-------------------------------------------------------
 
 		#--------------- Creates MultiIndex dataframe -------------------------------------
-		iterables = [np.arange(len(self.dfs)),np.arange(len(edges)+1),np.arange(prob_steps)]
-		index = pd.MultiIndex.from_product(iterables, names=["case","bin","level"])
-		CM = pd.DataFrame(np.zeros(prob_steps*(len(edges)+1)*len(self.dfs)),
-							columns=["pro"],index=index)
+		# iterables = [np.arange(self.Ndf),np.arange(nbins),np.arange(prob_steps)]
+		# index = pd.MultiIndex.from_product(iterables, names=["case","bin","level"])
+		# CM = pd.DataFrame(np.zeros(prob_steps*(nbins)*self.Ndf),
+		# 					columns=["pro"],index=index)
 		#----------------------------------------------------------------------------------
 
 		thresholds =  np.linspace(0,1.0,num=prob_steps,endpoint=True)
+
+		TP = np.empty((self.Ndf,nbins,prob_steps))
+		TN = np.empty((self.Ndf,nbins,prob_steps))
+		FP = np.empty((self.Ndf,nbins,prob_steps))
+		FN = np.empty((self.Ndf,nbins,prob_steps))
+		NS = np.empty((self.Ndf,nbins,prob_steps))
 
 		#------------------------- Loop over dataframes -------------------------------------
 		print("Loop over data frames ...")
@@ -110,24 +120,22 @@ class ClassifierQuality:
 			bin_cov = np.digitize(df[self.covariate].values,bins=edges)
 			#-----------------------------------------------------------
 
+			all_true = df[self.true_class].to_numpy(dtype=bool)
+			all_prob = df[self.variate].to_numpy()
+
 			#------------------ Loop over bins --------------------------------------------
-			print("Loop over bins ...")
-			Ns = []
-			for i in range(max(bin_cov)+1):
-				print("Bin {0}".format(i))
+			# print("Loop over bins ...")
+			for i in range(nbins):
+				# print("Bin {0}".format(i))
 				if i == 0: # There are no objects in bin zero, so we use it for all objects
 					idx = np.arange(len(df))
 				else:
 					idx = np.where(bin_cov == i)[0]
 
-				#-- Temporary dataframe --
-				tmp = df.iloc[idx].copy()
-				#-------------------------
-
-				#---------------------------------------
-				trues = tmp[self.true_class].to_numpy(dtype=bool)
-				probs = tmp[self.variate].to_numpy()
-				#---------------------------------------
+				#------Select bin sources -----
+				trues = all_true[idx]
+				probs = all_prob[idx]
+				#------------------------------
 
 				#-------- Verify true classes in bin ----------------------
 				if i == 0:
@@ -138,91 +146,129 @@ class ClassifierQuality:
 					bounds = "[{0:2.1f},{1:2.1f}]".format(edges[i-1],edges[i])
 
 				msg = "class in bin {0} of DataFrame {1}".format(bounds,j)
-				# mbn = "\nMin: {0:2.2f}, Max: {1:2.2f}".format(
-				# 		tmp[self.covariate].min(),tmp[self.covariate].max())
 
 				assert np.sum( trues) >= 1, "No True  " + msg 
 				assert np.sum(~trues) >= 1, "No False " + msg
 				#----------------------------------------------------------
 
 				#---------------------------------------------------
-				TP = np.empty(prob_steps)
-				TN = np.empty(prob_steps)
-				FP = np.empty(prob_steps)
-				FN = np.empty(prob_steps)
 				for p,th in enumerate(thresholds):
-					TP[p] = np.logical_and(probs>=th, trues).sum()
-					TN[p] = np.logical_and(probs< th,~trues).sum()
-					FP[p] = np.logical_and(probs>=th,~trues).sum()
-					FN[p] = np.logical_and(probs< th, trues).sum()
+					TP[j,i,p] = np.logical_and(probs>=th, trues).sum()
+					TN[j,i,p] = np.logical_and(probs< th,~trues).sum()
+					FP[j,i,p] = np.logical_and(probs>=th,~trues).sum()
+					FN[j,i,p] = np.logical_and(probs< th, trues).sum()
+					NS[j,i,p] = len(idx)
 
 
-				#----- Insert values ------------
-				CM.loc[(j,i),"pro"] = thresholds
-				CM.loc[(j,i),"TP"]  = TP
-				CM.loc[(j,i),"TN"]  = TN
-				CM.loc[(j,i),"FP"]  = FP
-				CM.loc[(j,i),"FN"]  = FN
-				#-------------------------------
+				# #----- Insert values ------------
+				# CM.loc[(j,i),"pro"] = thresholds
+				# CM.loc[(j,i),"TP"]  = TP
+				# CM.loc[(j,i),"TN"]  = TN
+				# CM.loc[(j,i),"FP"]  = FP
+				# CM.loc[(j,i),"FN"]  = FN
+				# #-------------------------------
 
-				#---- n_sources --------------------
-				CM.loc[(j,i),"n_sources"] = len(idx)
-				#-----------------------------------
+				# #---- n_sources --------------------
+				# CM.loc[(j,i),"n_sources"] = len(idx)
+				# #-----------------------------------
 
 		print("Computing metrics ...")
 		#---------- Metrics ------------------------------------------------------------------------
-		CM["CR"]  = 100.* CM["FP"] / (CM["FP"]+CM["TP"])
-		CM["FPR"] = 100.* CM["FP"] / (CM["FP"]+CM["TN"])
-		CM["TPR"] = 100.* CM["TP"] / (CM["TP"]+CM["FN"])
-		CM["PPV"] = 100.* CM["TP"] / (CM["TP"]+CM["FP"])
-		CM["ACC"] = 100.* (CM["TP"] + CM["TN"]) / (CM["TP"]+CM["TN"]+CM["FP"]+CM["FN"])
-		CM["MCC"] = 100.* (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/\
-			np.sqrt((CM["TP"]+CM["FP"])*(CM["TP"]+CM["FN"])*(CM["TN"]+CM["FP"])*(CM["TN"]+CM["FN"]))
-		CM["F1M"] = 100.* CM["TP"] / (CM["TP"] + 0.5*(CM["FP"] + CM["FN"]))
-		CM["dCOT"] = -1.0*np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
-		CM["dROC"] = -1.0*np.sqrt((CM["FPR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
-		CM["dPRC"] = -1.0*np.sqrt((CM["PPV"]-100.0)**2 + (CM["TPR"]-100.0)**2)
+		# CM["CR"]  = 100.* CM["FP"] / (CM["FP"]+CM["TP"])
+		# CM["FPR"] = 100.* CM["FP"] / (CM["FP"]+CM["TN"])
+		# CM["TPR"] = 100.* CM["TP"] / (CM["TP"]+CM["FN"])
+		# CM["PPV"] = 100.* CM["TP"] / (CM["TP"]+CM["FP"])
+		# CM["ACC"] = 100.* (CM["TP"] + CM["TN"]) / (CM["TP"]+CM["TN"]+CM["FP"]+CM["FN"])
+		# CM["MCC"] = 100.* (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/\
+		# 	np.sqrt((CM["TP"]+CM["FP"])*(CM["TP"]+CM["FN"])*(CM["TN"]+CM["FP"])*(CM["TN"]+CM["FN"]))
+		# CM["F1M"] = 100.* CM["TP"] / (CM["TP"] + 0.5*(CM["FP"] + CM["FN"]))
+		# CM["dCOT"] = -1.0*np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
+		# CM["dROC"] = -1.0*np.sqrt((CM["FPR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
+		# CM["dPRC"] = -1.0*np.sqrt((CM["PPV"]-100.0)**2 + (CM["TPR"]-100.0)**2)
+		# #-------------------------------------------------------------------------------------------
+
+		#---------- Metrics ------------------------------------------------------------------------
+		CR  = 100.* FP/(FP+TP)
+		FPR = 100.* FP/(FP+TN)
+		TPR = 100.* TP/(TP+FN)
+		PPV = 100.* TP/(TP+FP)
+		ACC = 100.* (TP+TN)/(TP+TN+FP+FN)
+		MCC = 100.* (TP*TN - FP*FN)/np.sqrt((TP+FP)*(TP+FN)*(TN+FP)*(TN+FN))
+		F1M = 100.* TP/(TP + 0.5*(FP + FN))
+		dCOT = -1.0*np.sqrt((CR -  0.0)**2 + (TPR-100.0)**2)
+		dROC = -1.0*np.sqrt((FPR-  0.0)**2 + (TPR-100.0)**2)
+		dPRC = -1.0*np.sqrt((PPV-100.0)**2 + (TPR-100.0)**2)
 		#-------------------------------------------------------------------------------------------
 
-		#------------ Groupby------------------
-		grp = CM.groupby(level=["bin","level"])
-		quality_mean = grp.mean()
-		quality_std  = grp.std()
-		#--------------------------------------
+		#--------------- Creates MultiIndex dataframe -------------------------------------
+		iterables = [np.arange(nbins),np.arange(prob_steps)]
+		index = pd.MultiIndex.from_product(iterables, names=["bin","level"])
+		quality = pd.DataFrame(np.zeros(prob_steps*nbins),columns=["pro"],index=index)
+		#----------------------------------------------------------------------------------
+
+		#------------ DF ----------------------------
+		quality["pro"]     = np.repeat(thresholds,nbins)
+		quality["TP"]      = np.mean(TP,axis=0).flatten()
+		quality["TN"]      = np.mean(TN,axis=0).flatten()
+		quality["FP"]      = np.mean(FP,axis=0).flatten()
+		quality["FN"]      = np.mean(FN,axis=0).flatten()
+		quality["CR"]      = np.mean(CR,axis=0).flatten()
+		quality["FPR"]     = np.mean(FPR,axis=0).flatten()
+		quality["TPR"]     = np.mean(TPR,axis=0).flatten()
+		quality["PPV"]     = np.mean(PPV,axis=0).flatten()
+		quality["ACC"]     = np.mean(ACC,axis=0).flatten()
+		quality["MCC"]     = np.mean(MCC,axis=0).flatten()
+		quality["F1M"]     = np.mean(F1M,axis=0).flatten()
+		quality["dCOT"]    = np.mean(dCOT,axis=0).flatten()
+		quality["dROC"]    = np.mean(dROC,axis=0).flatten()
+		quality["dPRC"]    = np.mean(dPRC,axis=0).flatten()
+		quality["sd_TN"]   = np.std(TN,axis=0).flatten()
+		quality["sd_FP"]   = np.std(FP,axis=0).flatten()
+		quality["sd_FN"]   = np.std(FN,axis=0).flatten()
+		quality["sd_CR"]   = np.std(CR,axis=0).flatten()
+		quality["sd_FPR"]  = np.std(FPR,axis=0).flatten()
+		quality["sd_TPR"]  = np.std(TPR,axis=0).flatten()
+		quality["sd_PPV"]  = np.std(PPV,axis=0).flatten()
+		quality["sd_ACC"]  = np.std(ACC,axis=0).flatten()
+		quality["sd_MCC"]  = np.std(MCC,axis=0).flatten()
+		quality["sd_F1M"]  = np.std(F1M,axis=0).flatten()
+		quality["sd_dCOT"] = np.std(dCOT,axis=0).flatten()
+		quality["sd_dROC"] = np.std(dROC,axis=0).flatten()
+		quality["sd_dPRC"] = np.std(dPRC,axis=0).flatten()
+		quality["n_sources"] = np.mean(NS,axis=0).flatten()
+		#----------------------------------------------
 
 		#------------------ Loop over bins --------------------------------------------
-		print("Finding optima per bin ...")
+		# print("Finding optima per bin ...")
 		optima = []
 		central = []
-		for i in range(len(edges)+1):
-			print("Bin {0}".format(i))
+		for i in range(nbins):
+			# print("Bin {0}".format(i))
 			#---------------- Identify optimum ------------------------------
 			if contamination_rate is None:
 				#------------ Metric ------------------------------------------
 				try:
-					idx_opt = np.nanargmax(quality_mean.loc[(i),metric].to_numpy())
+					idx_opt = np.nanargmax(quality.loc[(i),metric].to_numpy())
 				except ValueError as e:
 					print("Error in bin {0}".format(i))
-					print(quality_mean.loc[(i)])
+					print(quality.loc[(i)])
 					raise e
 				#---------------------------------------------------------------
 			else:
 				#------------ Contamination rate ------------------------------
 				try:
 					idx_opt = np.nanargmin(
-						  np.abs(quality_mean.loc[(i),"CR"].to_numpy() - 
+						  np.abs(quality.loc[(i),"CR"].to_numpy() - 
 						  contamination_rate))
 				except ValueError as e:
 					print("Error in bin {0}".format(i))
-					print(quality_mean.loc[(i)])
+					print(quality.loc[(i)])
 					raise e
 				#-------------------------------------------------------------
 			#------------------------------------------------------------------
 
 			#------------ Extract ---------------------------------------------
-			optimum_mu = quality_mean.loc[[(i,idx_opt)]]
-			optimum_sd = quality_mean.loc[[(i,idx_opt)]]
-			optimum    = optimum_mu.merge(optimum_sd,suffixes=("","_sd"))
+			optimum = quality.loc[[(i,idx_opt)]]
 			#----------------------------------------------------------------
 
 			#----------------- Insert values into DataFrames ------------
@@ -248,8 +294,7 @@ class ClassifierQuality:
 			optima.append(optimum)
 			#-------------------------------
 
-		self.quality_mu = quality_mean
-		self.quality_sd = quality_std
+		self.quality = quality
 		self.optima  = optima
 		self.edges   = edges
 		self.central = central
@@ -286,8 +331,7 @@ class ClassifierQuality:
 
 		
 		for i,OP in enumerate(self.optima):
-			MU = self.quality_mu.loc[(i)]
-			SD = self.quality_sd.loc[(i)]
+			MU = self.quality.loc[(i)]
 			if i==0:
 				color    ="black"
 				label_tp = "TPR"
@@ -297,10 +341,10 @@ class ClassifierQuality:
 				label_tp = "_nolegend_"
 				label_cr = "_nolegend_"
 
-			axs.fill_between(MU["pro"],MU["TPR"]-SD["TPR"],MU["TPR"]+SD["TPR"],
+			axs.fill_between(MU["pro"],MU["TPR"]-MU["sd_TPR"],MU["TPR"]+MU["sd_TPR"],
 							color=color,
 							zorder=-1,alpha=0.2)
-			axs.fill_between(MU["pro"],MU["CR"]-SD["CR"],MU["CR"]+SD["CR"],
+			axs.fill_between(MU["pro"],MU["CR"]-MU["sd_CR"],MU["CR"]+MU["sd_CR"],
 							color=color,
 							zorder=-1,alpha=0.2)
 
@@ -341,14 +385,13 @@ class ClassifierQuality:
 
 		for ax,m,title in zip(axs.flatten(),[["FPR","TPR"],["TPR","PPV"]],["ROC","PRC"]):
 			for i,OP in enumerate(self.optima):
-				MU = self.quality_mu.loc[(i)]
-				SD = self.quality_sd.loc[(i)]
+				MU = self.quality.loc[(i)]
 				if i==0:
 					color   ="black"
 				else:
 					color   = cmap(norm(OP[self.covariate].values[0]))
 
-				ax.fill_between(MU[m[0]],MU[m[1]]-SD[m[1]],MU[m[1]]+SD[m[1]],
+				ax.fill_between(MU[m[0]],MU[m[1]]-MU["sd_"+m[1]],MU[m[1]]+MU["sd_"+m[1]],
 								color=color,
 								zorder=0,alpha=0.2)
 				ax.plot(MU[m[0]],MU[m[1]],c=color,zorder=1)	
@@ -382,14 +425,13 @@ class ClassifierQuality:
 
 		for ax,m in zip(axs.flatten(),["F1M","ACC","MCC","dCOT","dROC","dPRC"]):
 			for i,OP in enumerate(self.optima):
-				MU = self.quality_mu.loc[(i)]
-				SD = self.quality_sd.loc[(i)]
+				MU = self.quality.loc[(i)]
 				if i==0:
 					color   ="black"
 				else:
 					color   = cmap(norm(OP[self.covariate].values[0]))
 
-				ax.fill_between(MU["pro"],MU[m]-SD[m],MU[m]+SD[m],
+				ax.fill_between(MU["pro"],MU[m]-MU["sd_"+m],MU[m]+MU["sd_"+m],
 								color=color,
 								zorder=0,alpha=0.2)
 				ax.plot(MU["pro"],MU[m],c=color,zorder=1)	
