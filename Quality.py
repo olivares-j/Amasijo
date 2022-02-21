@@ -26,34 +26,33 @@ class ClassifierQuality:
 			dfs = []
 			for data in file_data:	
 				if isinstance(data,str):
-					df = pd.read_csv(data,usecols=usecols)
-					dfs.append(df)
+					tmp = pd.read_csv(data,usecols=usecols)
+					dfs.append(tmp)
 				elif isinstance(data,pd.DataFrame):
-					df = data[usecols].copy()
-					dfs.append(df)
+					tmp = data[usecols].copy()
+					dfs.append(tmp)
 				else:
 					sys.exit(error_message)
 
-			self.df  = pd.concat(dfs,ignore_index=True)
+				del tmp
+
 			self.dfs = dfs
 
 		elif isinstance(file_data,str):
-			self.df = pd.read_csv(file_data,usecols=usecols)
-			self.dfs = [self.df]
+			df = pd.read_csv(file_data,usecols=usecols)
+			self.dfs = [df]
+			del df
 
 		elif isinstance(file_data,pd.DataFrame):
-			self.df = file_data[usecols].copy()
-			self.dfs = [self.df]
+			df = file_data[usecols].copy()
+			self.dfs = [df]
+			del df
 
 		else:
 			sys.exit(error_message)
 
 		#--------- Trim df according to covariate_limits -------
 		if isinstance(covariate_limits,list):
-			mask_valid = (self.df[covariate] > covariate_limits[0]) & \
-			             (self.df[covariate] < covariate_limits[1])
-			self.df = self.df[mask_valid]
-
 			list_dfs = []
 			for df in self.dfs:
 				mask_valid = (df[covariate] > covariate_limits[0]) & \
@@ -63,14 +62,24 @@ class ClassifierQuality:
 			self.dfs = list_dfs
 		#-------------------------------------------------------
 
-		self.vmin = self.df[covariate].min()
-		self.vmax = self.df[covariate].max()
+		self.vmin =  np.inf
+		self.vmax = -np.inf
+		
+		for df in self.dfs:
+			vmin = df[covariate].min()
+			vmax = df[covariate].max()
 
-		pmin = self.df[variate].min()
-		pmax = self.df[variate].max()
+			pmin = df[variate].min()
+			pmax = df[variate].max()
 
-		assert pmin >= 0.0 and pmin < 1.0,"Probability minimum {0:1.2f}".format(pmin)
-		assert pmax <= 1.0 and pmax > 0.0,"Probability maximum {0:1.2f}".format(pmax)
+			if vmin < self.vmin:
+				self.vmin = vmin
+
+			if vmax > self.vmax:
+				self.vmax = vmax
+
+			assert pmin >= 0.0 and pmin < 1.0,"Probability minimum {0:1.2f}".format(pmin)
+			assert pmax <= 1.0 and pmax > 0.0,"Probability maximum {0:1.2f}".format(pmax)
 
 	def confusion_matrix(self,bins=5,prob_steps=100,metric="ACC",contamination_rate=None):
 		''' Compute the confusion matrix on a grid of prob_steps for each bin of the covariate'''
@@ -94,14 +103,18 @@ class ClassifierQuality:
 		thresholds =  np.linspace(0,1.0,num=prob_steps,endpoint=True)
 
 		#------------------------- Loop over dataframes -------------------------------------
+		print("Loop over data frames ...")
 		for j,df in enumerate(self.dfs):
+			print("DF {0}".format(j))
 			#------------------- Digitize dataframe --------------------
 			bin_cov = np.digitize(df[self.covariate].values,bins=edges)
 			#-----------------------------------------------------------
 
 			#------------------ Loop over bins --------------------------------------------
+			print("Loop over bins ...")
 			Ns = []
 			for i in range(max(bin_cov)+1):
+				print("Bin {0}".format(i))
 				if i == 0: # There are no objects in bin zero, so we use it for all objects
 					idx = np.arange(len(df))
 				else:
@@ -156,6 +169,7 @@ class ClassifierQuality:
 				CM.loc[(j,i),"n_sources"] = len(idx)
 				#-----------------------------------
 
+		print("Computing metrics ...")
 		#---------- Metrics ------------------------------------------------------------------------
 		CM["CR"]  = 100.* CM["FP"] / (CM["FP"]+CM["TP"])
 		CM["FPR"] = 100.* CM["FP"] / (CM["FP"]+CM["TN"])
@@ -177,9 +191,11 @@ class ClassifierQuality:
 		#--------------------------------------
 
 		#------------------ Loop over bins --------------------------------------------
+		print("Finding optima per bin ...")
 		optima = []
 		central = []
 		for i in range(len(edges)+1):
+			print("Bin {0}".format(i))
 			#---------------- Identify optimum ------------------------------
 			if contamination_rate is None:
 				#------------ Metric ------------------------------------------
