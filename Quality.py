@@ -207,7 +207,7 @@ class ClassifierQuality:
 		#----------------------------------------------------------------------------------
 
 		#------------ DF ----------------------------
-		quality["pro"]     = np.repeat(thresholds,nbins)
+		quality["pro"]     = np.tile(thresholds,nbins)
 		quality["TP"]      = np.mean(TP,axis=0).flatten()
 		quality["TN"]      = np.mean(TN,axis=0).flatten()
 		quality["FP"]      = np.mean(FP,axis=0).flatten()
