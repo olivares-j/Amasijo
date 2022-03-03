@@ -83,7 +83,8 @@ class ClassifierQuality:
 			assert pmin >= 0.0 and pmin < 1.0,"Probability minimum {0:1.2f}".format(pmin)
 			assert pmax <= 1.0 and pmax > 0.0,"Probability maximum {0:1.2f}".format(pmax)
 
-	def confusion_matrix(self,bins=5,prob_steps=100,metric="ACC",contamination_rate=None):
+	def confusion_matrix(self,bins=5,prob_steps=100,metric="ACC",
+						contamination_rate=None,min_prob=0.01):
 		''' Compute the confusion matrix on a grid of prob_steps for each bin of the covariate'''
 
 		#------- Split data frame into bins ---------------------
@@ -97,20 +98,37 @@ class ClassifierQuality:
 		nbins = len(edges) + 1
 		#-------------------------------------------------------
 
-		#--------------- Creates MultiIndex dataframe -------------------------------------
-		# iterables = [np.arange(self.Ndf),np.arange(nbins),np.arange(prob_steps)]
-		# index = pd.MultiIndex.from_product(iterables, names=["case","bin","level"])
-		# CM = pd.DataFrame(np.zeros(prob_steps*(nbins)*self.Ndf),
-		# 					columns=["pro"],index=index)
-		#----------------------------------------------------------------------------------
+		#-------- Probability thresholds --------------------
+		if isinstance(prob_steps,int):
+			thresholds =  np.linspace(0,1.0,num=prob_steps,
+											endpoint=True)
+		elif isinstance(prob_steps,list):
+			thresholds = np.array(prob_steps)
 
-		thresholds =  np.linspace(0,1.0,num=prob_steps,endpoint=True)
+		elif isinstance(prob_steps,np.ndarray):
+			thresholds =  prob_steps
 
-		TP = np.empty((self.Ndf,nbins,prob_steps))
-		TN = np.empty((self.Ndf,nbins,prob_steps))
-		FP = np.empty((self.Ndf,nbins,prob_steps))
-		FN = np.empty((self.Ndf,nbins,prob_steps))
-		NS = np.empty((self.Ndf,nbins,prob_steps))
+		elif isinstance(prob_steps,dict):
+			to_concat = []
+			prev = min_prob
+			for k,v in prob_steps.items():
+				to_concat.append(np.linspace(
+							start=prev,stop=k,num=v,
+							endpoint=False))
+				prev = k
+			thresholds = np.concatenate(to_concat)
+
+		else:
+			sys.exit("prob_steps must be list or integer!")
+
+		ns_pro = len(thresholds)
+		#----------------------------------------------------
+
+		TP = np.empty((self.Ndf,nbins,ns_pro))
+		TN = np.empty((self.Ndf,nbins,ns_pro))
+		FP = np.empty((self.Ndf,nbins,ns_pro))
+		FN = np.empty((self.Ndf,nbins,ns_pro))
+		NS = np.empty((self.Ndf,nbins,ns_pro))
 
 		#------------------------- Loop over dataframes -------------------------------------
 		print("Loop over data frames ...")
@@ -159,34 +177,7 @@ class ClassifierQuality:
 					FN[j,i,p] = np.logical_and(probs< th, trues).sum()
 					NS[j,i,p] = len(idx)
 
-
-				# #----- Insert values ------------
-				# CM.loc[(j,i),"pro"] = thresholds
-				# CM.loc[(j,i),"TP"]  = TP
-				# CM.loc[(j,i),"TN"]  = TN
-				# CM.loc[(j,i),"FP"]  = FP
-				# CM.loc[(j,i),"FN"]  = FN
-				# #-------------------------------
-
-				# #---- n_sources --------------------
-				# CM.loc[(j,i),"n_sources"] = len(idx)
-				# #-----------------------------------
-
 		print("Computing metrics ...")
-		#---------- Metrics ------------------------------------------------------------------------
-		# CM["CR"]  = 100.* CM["FP"] / (CM["FP"]+CM["TP"])
-		# CM["FPR"] = 100.* CM["FP"] / (CM["FP"]+CM["TN"])
-		# CM["TPR"] = 100.* CM["TP"] / (CM["TP"]+CM["FN"])
-		# CM["PPV"] = 100.* CM["TP"] / (CM["TP"]+CM["FP"])
-		# CM["ACC"] = 100.* (CM["TP"] + CM["TN"]) / (CM["TP"]+CM["TN"]+CM["FP"]+CM["FN"])
-		# CM["MCC"] = 100.* (CM["TP"]*CM["TN"] - CM["FP"]*CM["FN"])/\
-		# 	np.sqrt((CM["TP"]+CM["FP"])*(CM["TP"]+CM["FN"])*(CM["TN"]+CM["FP"])*(CM["TN"]+CM["FN"]))
-		# CM["F1M"] = 100.* CM["TP"] / (CM["TP"] + 0.5*(CM["FP"] + CM["FN"]))
-		# CM["dCOT"] = -1.0*np.sqrt((CM["CR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
-		# CM["dROC"] = -1.0*np.sqrt((CM["FPR"]-0.0)**2 + (CM["TPR"]-100.0)**2)
-		# CM["dPRC"] = -1.0*np.sqrt((CM["PPV"]-100.0)**2 + (CM["TPR"]-100.0)**2)
-		# #-------------------------------------------------------------------------------------------
-
 		#---------- Metrics ------------------------------------------------------------------------
 		CR  = 100.* FP/(FP+TP)
 		FPR = 100.* FP/(FP+TN)
@@ -201,9 +192,9 @@ class ClassifierQuality:
 		#-------------------------------------------------------------------------------------------
 
 		#--------------- Creates MultiIndex dataframe -------------------------------------
-		iterables = [np.arange(nbins),np.arange(prob_steps)]
+		iterables = [np.arange(nbins),np.arange(ns_pro)]
 		index = pd.MultiIndex.from_product(iterables, names=["bin","level"])
-		quality = pd.DataFrame(np.zeros(prob_steps*nbins),columns=["pro"],index=index)
+		quality = pd.DataFrame(np.zeros(ns_pro*nbins),columns=["pro"],index=index)
 		#----------------------------------------------------------------------------------
 
 		#------------ DF ----------------------------
@@ -299,7 +290,7 @@ class ClassifierQuality:
 		self.edges   = edges
 		self.central = central
 
-	def plots(self,file_plot,figsize=(10,10),dpi=200):
+	def plots(self,file_plot,figsize=(10,10),dpi=200,log_scale=False):
 		"""Quality Plots """
 
 		#============ Plots ==================================================
@@ -353,13 +344,19 @@ class ClassifierQuality:
 			axs.scatter(OP["pro"],OP["TPR"],color=color,marker="X",label="_nolegend_",zorder=10)
 			axs.scatter(OP["pro"],OP["CR"],color=color,marker="X",label="_nolegend_",zorder=10)
 
-		axs.set_xlim(0,1.0)
-		axs.set_ylim(0,100.0)
-		axs.set_xticks(np.arange(0,1,step=0.10))
-		axs.yaxis.set_major_locator(MultipleLocator(10))
-		axs.yaxis.set_major_formatter(FormatStrFormatter('%d'))
-		# For the minor ticks, use no labels; default NullFormatter.
-		axs.yaxis.set_minor_locator(MultipleLocator(5))
+		
+		if log_scale:
+			axs.set_xscale("log")
+			axs.set_yscale("log")
+		else:
+			axs.set_xlim(0,1.0)
+			axs.set_ylim(0,100.0)
+			axs.set_xticks(np.arange(0,1,step=0.10))
+			axs.yaxis.set_major_locator(MultipleLocator(10))
+			axs.yaxis.set_major_formatter(FormatStrFormatter('%d'))
+			# For the minor ticks, use no labels; default NullFormatter.
+			axs.yaxis.set_minor_locator(MultipleLocator(5))
+
 		axs.set_ylabel("Quality indicator [%]")
 		axs.set_xlabel("Probability")
 		axs.legend(loc="best",ncol=1)

@@ -894,11 +894,19 @@ if __name__ == "__main__":
 					"location":np.array([0.0,0.0,0.0]),
 					"covariance":np.diag([1.,1.,1.])}}
 
+	# photometric_args = {
+	# 					"log_age": 8.845,    
+	# 					"metallicity":0.012,
+	# 					"Av": 0.0,         
+	# 					"mass_limits":[0.01,2.6], 
+	# 					"bands":["V","I","G","BP","RP"],
+	# 					"mass_prior":"Uniform"
+	# 					}
 	photometric_args = {
-						"log_age": 8.845,    
-						"metallicity":0.012,
+						"log_age": 8.47,    
+						"metallicity":0.0196,
 						"Av": 0.0,         
-						"mass_limits":[0.01,2.6], 
+						"mass_limits":[0.01,3.4], 
 						"bands":["V","I","G","BP","RP"],
 						"mass_prior":"Uniform"
 						}
