@@ -64,21 +64,21 @@ class ClassifierQuality:
 
 		self.Ndf  = len(self.dfs)
 
-		self.vmin =  np.inf
-		self.vmax = -np.inf
+		self.covariate_min =  np.inf
+		self.covariate_max = -np.inf
 		
 		for df in self.dfs:
-			vmin = df[covariate].min()
-			vmax = df[covariate].max()
+			cvmin = df[covariate].min()
+			cvmax = df[covariate].max()
 
 			pmin = df[variate].min()
 			pmax = df[variate].max()
 
-			if vmin < self.vmin:
-				self.vmin = vmin
+			if cvmin < self.covariate_min:
+				self.covariate_min = cvmin
 
-			if vmax > self.vmax:
-				self.vmax = vmax
+			if cvmax > self.covariate_max:
+				self.covariate_max = cvmax
 
 			assert pmin >= 0.0 and pmin < 1.0,"Probability minimum {0:1.2f}".format(pmin)
 			assert pmax <= 1.0 and pmax > 0.0,"Probability maximum {0:1.2f}".format(pmax)
@@ -89,7 +89,7 @@ class ClassifierQuality:
 
 		#------- Split data frame into bins ---------------------
 		if isinstance(bins,int):
-			edges = np.linspace(self.vmin,self.vmax,num=bins,endpoint=False)
+			edges = np.linspace(self.covariate_min,self.covariate_max,num=bins,endpoint=False)
 		elif isinstance(bins,list):
 			edges = np.array(bins)
 		else:
@@ -157,9 +157,9 @@ class ClassifierQuality:
 
 				#-------- Verify true classes in bin ----------------------
 				if i == 0:
-					bounds = "[{0:2.1f},{1:2.1f}]".format(self.vmin,self.vmax)
+					bounds = "[{0:2.1f},{1:2.1f}]".format(self.covariate_min,self.covariate_max)
 				elif i == max(bin_cov):
-					bounds = "[{0:2.1f},{1:2.1f}]".format(edges[i-1],self.vmax)
+					bounds = "[{0:2.1f},{1:2.1f}]".format(edges[i-1],self.covariate_max)
 				else:
 					bounds = "[{0:2.1f},{1:2.1f}]".format(edges[i-1],edges[i])
 
@@ -273,7 +273,7 @@ class ClassifierQuality:
 				if i < len(edges):
 					value = edges[i-1] + 0.5*(edges[i]-edges[i-1])
 				else:
-					value = edges[i-1] + 0.5*(self.vmax - edges[i-1])
+					value = edges[i-1] + 0.5*(self.covariate_max - edges[i-1])
 				value = round(value,2)
 				central.append(value)
 				optimum.insert(loc=0,column=self.covariate,value=value)
@@ -298,7 +298,7 @@ class ClassifierQuality:
 
 		#------------------ Color bar and normalization ----------------
 		cmap = plt.get_cmap("jet")
-		norm = Normalize(vmin=self.vmin,vmax=self.vmax)
+		norm = Normalize(vmin=self.covariate_min,vmax=self.covariate_max)
 		sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
 		sm.set_array([])
 		minor_ticks = np.delete(self.edges.copy(),np.argmin(self.edges))
@@ -396,16 +396,17 @@ class ClassifierQuality:
 
 			ax.set_xlabel(m[0],labelpad=0)
 			ax.set_ylabel(m[1],labelpad=0)
-			ax.set_xlim(0,100.0)
-			ax.set_ylim(0,100.0)
-			ax.set_aspect("equal")
+			if log_scale:
+				ax.set_xscale("log")
+				ax.set_yscale("log")
+
 			ax.set_title(title)
 		pdf.savefig(bbox_inches="tight",dpi=dpi)
 		plt.close()
 		#=========================================================================================
 
 		#========================= Metrics =======================================================
-		fig, axs = plt.subplots(nrows=3, ncols=2, sharex=True,figsize=figsize)
+		fig, axs = plt.subplots(nrows=3, ncols=1, sharex=True,figsize=figsize)
 		plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=0.0)
 		#-------------------- Colorbar --------------------------------------
 		cbar = fig.colorbar(sm, 
@@ -420,7 +421,45 @@ class ClassifierQuality:
 		cbar.ax.xaxis.set_ticks(minor_ticks, minor=True)		
 		#-----------------------------------------------------------------------------
 
-		for ax,m in zip(axs.flatten(),["F1M","ACC","MCC","dCOT","dROC","dPRC"]):
+		for ax,m in zip(axs.flatten(),["F1M","ACC","MCC"]):
+			for i,OP in enumerate(self.optima):
+				MU = self.quality.loc[(i)]
+				if i==0:
+					color   ="black"
+				else:
+					color   = cmap(norm(OP[self.covariate].values[0]))
+
+				ax.fill_between(MU["pro"],MU[m]-MU["sd_"+m],MU[m]+MU["sd_"+m],
+								color=color,
+								zorder=0,alpha=0.2)
+				ax.plot(MU["pro"],MU[m],c=color,zorder=1)	
+				ax.scatter(OP["pro"],OP[m],color=color,marker="X",zorder=2)
+
+			if log_scale:
+				ax.set_xscale("log")
+				ax.set_yscale("log")
+			ax.set_ylabel(m,labelpad=0)
+		axs[2].set_xlabel("Probability")
+		pdf.savefig(bbox_inches="tight",dpi=dpi)
+		plt.close()
+
+
+		fig, axs = plt.subplots(nrows=3, ncols=1, sharex=True,figsize=figsize)
+		plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=0.0)
+		#-------------------- Colorbar --------------------------------------
+		cbar = fig.colorbar(sm, 
+							ax = axs,
+							orientation="horizontal",
+							ticklocation="top",
+							label=self.covariate,
+							ticks=self.central,
+							format='%.1f',
+							pad=0.07
+							)
+		cbar.ax.xaxis.set_ticks(minor_ticks, minor=True)		
+		#-----------------------------------------------------------------------------
+
+		for ax,m in zip(axs.flatten(),["dCOT","dROC","dPRC"]):
 			for i,OP in enumerate(self.optima):
 				MU = self.quality.loc[(i)]
 				if i==0:
@@ -436,10 +475,10 @@ class ClassifierQuality:
 
 			ax.set_xlim(0,1.0)
 			ax.set_ylabel(m,labelpad=0)
-		axs[2,0].set_xlabel("Probability")
-		axs[2,1].set_xlabel("Probability")
+		axs[2].set_xlabel("Probability")
 		pdf.savefig(bbox_inches="tight",dpi=dpi)
 		plt.close()
+
 		#========================================================================================
 
 		pdf.close()
