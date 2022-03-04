@@ -587,8 +587,8 @@ class ClassifierQuality:
 		tab = tab.loc[:,[self.covariate,"pro","n_sources",
 						"TP","FP","TN","FN",
 						"TPR","CR","FPR",
-						self.metric]]
-		tab.to_latex(file_tex,column_format=11*"|c" + "|",
+						"ACC","MCC","F1M","PPV"]]
+		tab.to_latex(file_tex,column_format=14*"|c" + "|",
 						float_format="%.2f",na_rep="-",escape=False)
 		#--------------------------------------------------------------
 
