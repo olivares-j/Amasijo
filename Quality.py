@@ -348,14 +348,14 @@ class ClassifierQuality:
 		if log_scale:
 			# axs.set_xscale("log")
 			axs.set_yscale("log")
-		else:
-			axs.set_xlim(0,1.0)
-			axs.set_ylim(0,100.0)
-			axs.set_xticks(np.arange(0,1,step=0.10))
-			axs.yaxis.set_major_locator(MultipleLocator(10))
-			axs.yaxis.set_major_formatter(FormatStrFormatter('%d'))
-			# For the minor ticks, use no labels; default NullFormatter.
-			axs.yaxis.set_minor_locator(MultipleLocator(5))
+		# else:
+		# 	axs.set_xlim(0,1.0)
+		# 	axs.set_ylim(0,100.0)
+		# 	axs.set_xticks(np.arange(0,1,step=0.10))
+		# 	axs.yaxis.set_major_locator(MultipleLocator(10))
+		# 	axs.yaxis.set_major_formatter(FormatStrFormatter('%d'))
+		# 	# For the minor ticks, use no labels; default NullFormatter.
+		# 	axs.yaxis.set_minor_locator(MultipleLocator(5))
 
 		axs.set_ylabel("Quality indicator [%]")
 		axs.set_xlabel("Probability")
@@ -397,14 +397,14 @@ class ClassifierQuality:
 
 		if log_scale:
 			axs.set_yscale("log")
-		else:
-			axs.set_xlim(0,1.0)
-			axs.set_ylim(0,100.0)
-			axs.set_xticks(np.arange(0,1,step=0.10))
-			axs.yaxis.set_major_locator(MultipleLocator(10))
-			axs.yaxis.set_major_formatter(FormatStrFormatter('%d'))
-			# For the minor ticks, use no labels; default NullFormatter.
-			axs.yaxis.set_minor_locator(MultipleLocator(5))
+		# else:
+		# 	axs.set_xlim(0,1.0)
+		# 	axs.set_ylim(0,100.0)
+		# 	axs.set_xticks(np.arange(0,1,step=0.10))
+		# 	axs.yaxis.set_major_locator(MultipleLocator(10))
+		# 	axs.yaxis.set_major_formatter(FormatStrFormatter('%d'))
+		# 	# For the minor ticks, use no labels; default NullFormatter.
+		# 	axs.yaxis.set_minor_locator(MultipleLocator(5))
 
 		axs.set_ylabel("True Positive Rate [%]")
 		axs.set_xlabel("Probability")
@@ -447,14 +447,14 @@ class ClassifierQuality:
 		if log_scale:
 			# axs.set_xscale("log")
 			axs.set_yscale("log")
-		else:
-			axs.set_xlim(0,1.0)
-			axs.set_ylim(0,100.0)
-			axs.set_xticks(np.arange(0,1,step=0.10))
-			axs.yaxis.set_major_locator(MultipleLocator(10))
-			axs.yaxis.set_major_formatter(FormatStrFormatter('%d'))
-			# For the minor ticks, use no labels; default NullFormatter.
-			axs.yaxis.set_minor_locator(MultipleLocator(5))
+		# else:
+		# 	axs.set_xlim(0,1.0)
+		# 	axs.set_ylim(0,100.0)
+		# 	axs.set_xticks(np.arange(0,1,step=0.10))
+		# 	axs.yaxis.set_major_locator(MultipleLocator(10))
+		# 	axs.yaxis.set_major_formatter(FormatStrFormatter('%d'))
+		# 	# For the minor ticks, use no labels; default NullFormatter.
+		# 	axs.yaxis.set_minor_locator(MultipleLocator(5))
 
 		axs.set_ylabel("Contamination Rate [%]")
 		axs.set_xlabel("Probability")
@@ -534,7 +534,6 @@ class ClassifierQuality:
 				ax.scatter(OP["pro"],OP[m],color=color,marker="X",zorder=2)
 
 			if log_scale:
-				# ax.set_xscale("log")
 				ax.set_yscale("log")
 			ax.set_ylabel(m,labelpad=0)
 		axs[2].set_xlabel("Probability")
