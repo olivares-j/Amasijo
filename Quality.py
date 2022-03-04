@@ -346,7 +346,7 @@ class ClassifierQuality:
 
 		
 		if log_scale:
-			axs.set_xscale("log")
+			# axs.set_xscale("log")
 			axs.set_yscale("log")
 		else:
 			axs.set_xlim(0,1.0)
@@ -364,9 +364,107 @@ class ClassifierQuality:
 		plt.close()
 		#=========================================================================================
 
+		#======================= TPR ================================
+		#-------------------- Colorbar --------------------------------------
+		fig, axs = plt.subplots(figsize=figsize)
+		divider = make_axes_locatable(axs)
+		# Add an axes above the main axes.
+		cax = divider.append_axes("top", size="7%", pad="2%")
+		cbar = fig.colorbar(sm, cax=cax, 
+							orientation="horizontal",
+							ticklocation="top",
+							label=self.covariate,
+							ticks=self.central,
+							format='%.1f'
+							)
+		cbar.ax.xaxis.set_ticks(minor_ticks, minor=True)		
+		#-----------------------------------------------------------------------------
+
+		
+		for i,OP in enumerate(self.optima):
+			MU = self.quality.loc[(i)]
+			if i==0:
+				color    ="black"
+			else:
+				color    = cmap(norm(OP[self.covariate].values[0]))
+
+			axs.fill_between(MU["pro"],MU["TPR"]-MU["sd_TPR"],MU["TPR"]+MU["sd_TPR"],
+							color=color,
+							zorder=-1,alpha=0.2)
+
+			axs.plot(MU["pro"],MU["TPR"],c=color)		
+			axs.scatter(OP["pro"],OP["TPR"],color=color,marker="X",zorder=10)
+
+		if log_scale:
+			axs.set_yscale("log")
+		else:
+			axs.set_xlim(0,1.0)
+			axs.set_ylim(0,100.0)
+			axs.set_xticks(np.arange(0,1,step=0.10))
+			axs.yaxis.set_major_locator(MultipleLocator(10))
+			axs.yaxis.set_major_formatter(FormatStrFormatter('%d'))
+			# For the minor ticks, use no labels; default NullFormatter.
+			axs.yaxis.set_minor_locator(MultipleLocator(5))
+
+		axs.set_ylabel("True Positive Rate [%]")
+		axs.set_xlabel("Probability")
+		pdf.savefig(bbox_inches="tight",dpi=dpi)
+		plt.close()
+		#=========================================================================================
+
+		#======================= CR ================================
+		#-------------------- Colorbar --------------------------------------
+		fig, axs = plt.subplots(figsize=figsize)
+		divider = make_axes_locatable(axs)
+		# Add an axes above the main axes.
+		cax = divider.append_axes("top", size="7%", pad="2%")
+		cbar = fig.colorbar(sm, cax=cax, 
+							orientation="horizontal",
+							ticklocation="top",
+							label=self.covariate,
+							ticks=self.central,
+							format='%.1f'
+							)
+		cbar.ax.xaxis.set_ticks(minor_ticks, minor=True)		
+		#-----------------------------------------------------------------------------
+
+		
+		for i,OP in enumerate(self.optima):
+			MU = self.quality.loc[(i)]
+			if i==0:
+				color    ="black"
+			else:
+				color    = cmap(norm(OP[self.covariate].values[0]))
+
+			axs.fill_between(MU["pro"],MU["CR"]-MU["sd_CR"],MU["CR"]+MU["sd_CR"],
+							color=color,
+							zorder=-1,alpha=0.2)
+
+			axs.plot(MU["pro"],MU["CR"], c=color,ls="--")		
+			axs.scatter(OP["pro"],OP["CR"],color=color,marker="X",zorder=10)
+
+		
+		if log_scale:
+			# axs.set_xscale("log")
+			axs.set_yscale("log")
+		else:
+			axs.set_xlim(0,1.0)
+			axs.set_ylim(0,100.0)
+			axs.set_xticks(np.arange(0,1,step=0.10))
+			axs.yaxis.set_major_locator(MultipleLocator(10))
+			axs.yaxis.set_major_formatter(FormatStrFormatter('%d'))
+			# For the minor ticks, use no labels; default NullFormatter.
+			axs.yaxis.set_minor_locator(MultipleLocator(5))
+
+		axs.set_ylabel("Contamination Rate [%]")
+		axs.set_xlabel("Probability")
+		pdf.savefig(bbox_inches="tight",dpi=dpi)
+		plt.close()
+		#=========================================================================================
+
 		#=========================== ROC & PRC ===================================================
-		fig, axs = plt.subplots(nrows=1, ncols=2, sharex=True,figsize=figsize)
-		plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=0.0)
+		fig, axs = plt.subplots(nrows=1, ncols=2,figsize=figsize)
+		# plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=0.01)
 		#-------------------- Colorbar --------------------------------------
 		cbar = fig.colorbar(sm, 
 							ax = axs,
@@ -436,7 +534,7 @@ class ClassifierQuality:
 				ax.scatter(OP["pro"],OP[m],color=color,marker="X",zorder=2)
 
 			if log_scale:
-				ax.set_xscale("log")
+				# ax.set_xscale("log")
 				ax.set_yscale("log")
 			ax.set_ylabel(m,labelpad=0)
 		axs[2].set_xlabel("Probability")
@@ -473,7 +571,6 @@ class ClassifierQuality:
 				ax.plot(MU["pro"],MU[m],c=color,zorder=1)	
 				ax.scatter(OP["pro"],OP[m],color=color,marker="X",zorder=2)
 
-			ax.set_xlim(0,1.0)
 			ax.set_ylabel(m,labelpad=0)
 		axs[2].set_xlabel("Probability")
 		pdf.savefig(bbox_inches="tight",dpi=dpi)
