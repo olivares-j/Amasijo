@@ -352,8 +352,12 @@ class Amasijo(object):
 		else:
 			df_ph = df_ph_mist
 
-		#------- Assert valid masses ----------------------------------------
-		idx = np.where((df_ph["G_mag"] > 21) | np.isnan(df_ph["G_mag"]))[0]
+		#------- Assert valid magnitude and masses ------------------------------------------------
+		bad =  (df_ph["G_mag"]  >21.0) | (df_ph["G_mag"]  <4.0) | np.isnan(df_ph["G_mag"])  | \
+			   (df_ph["BP_mag"] >21.0) | (df_ph["BP_mag"] <4.0) | np.isnan(df_ph["BP_mag"]) | \
+			   (df_ph["RP_mag"] >21.0) | (df_ph["RP_mag"] <4.0) | np.isnan(df_ph["RP_mag"]) 
+		idx = np.where(bad)[0]
+		#---------------------------------------------------------------------------------------
 
 		if len(idx) > 0:
 			bad = masses[idx]
@@ -380,6 +384,9 @@ class Amasijo(object):
 		#---- Astrometric and photometric values ------
 		true_as = true.loc[:,self.labels_true_as]
 		true_ph = true.loc[:,["G_mag","BP_mag","RP_mag"]]
+		true_sp = true.loc[:,["G_mag","BP_mag","RP_mag","Teff","logg"]]
+		index = true.index
+		del true
 		#------------------------------------------------
 
 		#-------- G RVS -----------------------------------------------------------------------
@@ -387,41 +394,11 @@ class Amasijo(object):
 		# file:///home/jolivares/Downloads/GAIA-C5-TN-UB-CJ-041.pdf
 		# G − GRVS = 0.0386 + 0.9457*(BP-RP) - 0.1149*(BP-RP)**2 + 0.0022 (BP-RP)**3 + E(0.06)
 		# GRVS = G - 0.0386 - 0.9457*(BP-RP) + 0.1149*(BP-RP)**2 - 0.0022 (BP-RP)**3
-		true["BP_RP"] = true["BP_mag"] - true["RP_mag"]
-		true["GRVS_mag"] = true.apply(lambda x: 
-			x["G_mag"] - 0.0386 - 0.9457*(x["BP_RP"]) + 
-			0.1149*(x["BP_RP"]**2) - 0.0022+(x["BP_RP"]**3),
+		true_sp["GRVS_mag"] = true_sp.apply(lambda x: 
+			x["G_mag"] - 0.0386 - 0.9457*(x["BP_mag"]-x["RP_mag"]) + 
+			0.1149*((x["BP_mag"]-x["RP_mag"])**2) - 0.0022+((x["BP_mag"]-x["RP_mag"])**3),
 			axis=1)
 		#--------------------------------------------------------------------------------------
-
-		#=================== Angular correlations =========================
-		angular_corr = np.zeros((6*N,6*N))
-
-		#------ Angular separations ----------
-		theta = AngularSeparation(true[self.labels_true_as[:2]].to_numpy())
-
-		if angular_correlations is not None:
-			#-- Parallax angular correlations --------
-			corr_plx = covariance_parallax(theta,
-							case=angular_correlations)
-
-			#-- Proper motions angular correlations --
-			corr_ppm = covariance_proper_motion(theta,
-							case=angular_correlations)
-
-			#----- Fill parallax part ---------------
-			idx = np.arange(2,6*N,step=6)
-			angular_corr[np.ix_(idx,idx)] = corr_plx
-			#----------------------------------------
-
-			#----- Fill pmra part ---------------
-			idx = np.arange(3,6*N,step=6)
-			angular_corr[np.ix_(idx,idx)] = corr_ppm
-
-			#----- Fill pmdec part ---------------
-			idx = np.arange(4,6*N,step=6)
-			angular_corr[np.ix_(idx,idx)] = corr_ppm
-		#=====================================================================
 
 		#================== Uncertainties ================================
 		ra_unc,dec_unc = position_uncertainty(true_ph["G_mag"],
@@ -433,9 +410,9 @@ class Amasijo(object):
 		mua_unc,mud_unc = proper_motion_uncertainty(true_ph["G_mag"], 
 							release=self.release)
 
-		rvl_unc = radial_velocity_uncertainty(grvs=true["GRVS_mag"],
-							teff=true["Teff"],
-							logg=true["logg"],
+		rvl_unc = radial_velocity_uncertainty(grvs=true_sp["GRVS_mag"],
+							teff=true_sp["Teff"],
+							logg=true_sp["logg"],
 							release=self.release)
 
 		g_unc   = magnitude_uncertainty(band="g",maglist=true_ph["G_mag"],
@@ -446,6 +423,7 @@ class Amasijo(object):
 
 		rp_unc  = magnitude_uncertainty(band="rp",maglist=true_ph["RP_mag"], 
 							release=self.release)
+		del true_sp
 		#------------------------------------------------------------
 
 		#--- Correct units ----
@@ -468,35 +446,85 @@ class Amasijo(object):
 		#---------------------------------------------------
 		#==================================================================
 
-		#======= Astrometry =================================
-		u_as = unc_as.copy()
-
+		#================= Astrometry =================================
 		#-------------- Missing rvel -----------------
 		idx_nan_rvl = np.where(np.isnan(rvl_unc))[0]
-		u_as[idx_nan_rvl,5] = 99
+		unc_as[idx_nan_rvl,5] = 99
 		#--------------------------------------------
 
-		#------ Covariance ---------------
+		#------ Fix units --------------------------
 		# Uncertainty must be in same units as value
-		u_as[:,0] /= 3.6e6 # mas to degrees
-		u_as[:,1] /= 3.6e6 # mas to degrees
-		cov_as = np.diag(u_as.flatten()**2)
-		# Add angular correlations
-		cov_as +=  angular_corr 
-		#----------------------------------
+		unc_as[:,0] /= 3.6e6 # mas to degrees
+		unc_as[:,1] /= 3.6e6 # mas to degrees
+		#-------------------------------------------
 
-		#------- Observed values ---------------------
-		obs_as = rng.multivariate_normal(
-					mean=true_as.to_numpy().flatten(),
-					cov=cov_as,
-					tol=1e-8,
-					method='cholesky',
-					size=1).reshape((N,6))
-		#---------------------------------------------
+		if angular_correlations is not None:
+			print("Using {} angular correlation function".format(
+				angular_correlations))
+			#-------------- Allocate matrix --------------
+			cov_as = np.zeros((6*N,6*N),dtype=np.float32)
+
+			#------ Angular separations ------------------
+			theta = AngularSeparation(
+				true_as[self.labels_true_as[:2]].to_numpy())
+			#---------------------------------------------
+
+			#-- Parallax angular correlations --------
+			corr_plx = covariance_parallax(theta,
+							case=angular_correlations)
+
+			#-- Proper motions angular correlations --
+			corr_ppm = covariance_proper_motion(theta,
+							case=angular_correlations)
+
+			#----- Fill parallax part ---------------
+			idx = np.arange(2,6*N,step=6)
+			cov_as[np.ix_(idx,idx)] = corr_plx
+			#----------------------------------------
+
+			#----- Fill pmra part ---------------
+			idx = np.arange(3,6*N,step=6)
+			cov_as[np.ix_(idx,idx)] = corr_ppm
+			#----------------------------------------
+
+			#----- Fill pmdec part ---------------
+			idx = np.arange(4,6*N,step=6)
+			cov_as[np.ix_(idx,idx)] = corr_ppm
+			#---------------------------------------
+
+			del theta,corr_plx,corr_ppm
+
+			# Add variances to angular correlations
+			cov_as += np.diag(unc_as.flatten()**2)
+		
+			#------- Observed values ---------------------
+			obs_as = rng.multivariate_normal(
+						mean=true_as.to_numpy().flatten(),
+						cov=cov_as,
+						tol=1e-8,
+						method='cholesky',
+						size=1).reshape((N,6))
+			#---------------------------------------------
+
+		else:
+			#----- Loop over stars -------------------------
+			obs_as = np.empty((N,6))
+			for i,mu in true_as.iterrows():
+				obs_as[i] = rng.multivariate_normal(
+						mean=mu,cov=np.diag(unc_as[i]**2),
+						tol=1e-8,method="cholesky",size=1)
+			#-----------------------------------------------
+		#=====================================================================
 
 		#-- Replace nan rvel by nan -------
 		obs_as[idx_nan_rvl,5] = np.nan
+		unc_as[idx_nan_rvl,5] = np.nan
 		#--------------------------------
+
+		#------ Fix units --------------------------
+		unc_as[:,0] *= 3.6e6 #degrees back to mas
+		unc_as[:,1] *= 3.6e6 #degrees back to mas
+		#-------------------------------------------
 
 		#--------- Data Frames ------------------
 		df_obs_as = pd.DataFrame(data=obs_as,
@@ -513,19 +541,17 @@ class Amasijo(object):
 					columns=self.labels_cor_as)
 		df_as = df_as.join(df_cor_as)
 		#----------------------------------------
+		del df_obs_as,df_unc_as,df_cor_as,obs_as,unc_as
 		#===========================================================
 
-		#======= Photometry ======================
-		#------ Covariance ---------------
-		cov_ph = np.diag(unc_ph.flatten()**2)
-		#----------------------------------
-
-		#------- Observed values ------------
-		obs_ph = rng.multivariate_normal(
-					mean=true_ph.to_numpy().flatten(),
-					cov=cov_ph,
-					size=1).reshape((N,3))
-		#-------------------------------------
+		#======= Photometry ===================================
+		#----- Loop over stars -------------------------
+		obs_ph = np.empty((N,3))
+		for i,mu in true_ph.iterrows():
+			obs_ph[i] = rng.multivariate_normal(
+					mean=mu,cov=np.diag(unc_ph[i]**2),
+					tol=1e-8,method="cholesky",size=1)
+		#-----------------------------------------------
 
 		#--------- Data Frames ------------------
 		df_obs_ph = pd.DataFrame(data=obs_ph,
@@ -535,14 +561,16 @@ class Amasijo(object):
 
 		df_ph = df_obs_ph.join(df_unc_ph)
 		#-----------------------------------------
+		del df_obs_ph,df_unc_ph,obs_ph,unc_ph
 		#===========================================
 
 		#------- Join ------------
 		df_obs = df_as.join(df_ph)
+		del df_as,df_ph
 
 		#------- Set index -------
-		df_obs.set_index(true.index,inplace=True)
-		
+		df_obs.set_index(index,inplace=True)
+
 		return df_obs
 
 	def read_mcluster(self,file):
@@ -556,7 +584,7 @@ class Amasijo(object):
 
 	#================= Generate cluster ==========================
 	def generate_cluster(self,file,n_stars=100,
-						angular_correlations="Vasiliev+2019",
+						angular_correlations="Lindegren+2020",
 						index_label="source_id"):
 
 		if hasattr(self,"mcluster_args"):
@@ -903,8 +931,8 @@ class Amasijo(object):
 
 if __name__ == "__main__":
 
-	seed      = 1
-	n_stars   = 1000
+	seed      = 9
+	n_stars   = int(1e3)
 	dir_main  = "/home/jolivares/OCs/TWH/Mecayotl/runs/iter_0/Kalkayotl/Gaussian_central/"
 	base_name = "TWH_n{0}".format(n_stars)
 	file_plot = dir_main + base_name + ".pdf"
