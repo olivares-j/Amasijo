@@ -321,7 +321,7 @@ class Amasijo(object):
 
 		#------- Faint photometry ---------------------------------------
 		if n_faint > 0:
-			print("Warning: objects with mass lower than MIST mass " +\
+			print("WARNING: objects with mass lower than MIST mass " +\
 							"limit will have wrong photometry!!!!!")
 
 			#--------- Minimal mass -----------------------
@@ -362,7 +362,7 @@ class Amasijo(object):
 		if len(idx_bad) > 0:
 			msg_error = "ERROR: Modify the mass interval!\n" + \
 			"Stars are being generated outside the PyGaia limits [4,21]\n" +\
-			"or above MIST photometric limits!\n"
+			"or above MIST photometric limits!"
 			print(msg_error)
 			print("Bad photometric sources:")
 			print(df_ph.iloc[idx_bad])
