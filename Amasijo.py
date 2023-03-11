@@ -360,13 +360,10 @@ class Amasijo(object):
 		#---------------------------------------------------------------------------------------
 
 		if len(idx_bad) > 0:
-			bad = masses[idx_bad]
 			msg_error = "ERROR: Modify the mass interval!\n" + \
 			"Stars are being generated outside the PyGaia limits [4,21]\n" +\
-			"or above MIST photometric limits!\n" +\
-			"Bad masses have the following values: Min.: {0:1.2f}, Max.:{1:2.1f}"
-
-			print(msg_error.format(bad.min(),bad.max()))
+			"or above MIST photometric limits!\n"
+			print(msg_error)
 			print("Bad photometric sources:")
 			print(df_ph.iloc[idx_bad])
 			sys.exit()
