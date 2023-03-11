@@ -14,8 +14,8 @@ from distributions import mveff,mvking
 
 from pygaia.astrometry.vectorastrometry import phase_space_to_astrometry
 from pygaia.errors.astrometric import parallax_uncertainty,total_position_uncertainty,proper_motion_uncertainty
-from pygaia.errors.photometric import g_magnitude_uncertainty,bp_magnitude_uncertainty,rp_magnitude_uncertainty
-from pygaia.errors.spectroscopic import vrad_error_sky_avg 
+from pygaia.errors.photometric import magnitude_uncertainty
+from pygaia.errors.spectroscopic import radial_velocity_uncertainty
 
 from isochrones import get_ichrone
 from isochrones.priors import ChabrierPrior
@@ -29,12 +29,14 @@ class Amasijo(object):
 					astrometric_args=None,
 					mcluster_args=None,
 					kalkayotl_file=None,
+					release="dr3",
 					seed=1234):
 
 		#------ Set Seed -----------------------------------
 		np.random.seed(seed=seed)
 		self.random_state = np.random.RandomState(seed=seed)
 		self.seed = seed
+		self.release = release
 		#---------------------------------------------------
 
 		#--------------- Tracks ----------------------------
@@ -67,16 +69,16 @@ class Amasijo(object):
 		self.labels_true_as = ["ra_true","dec_true","parallax_true",
 								"pmra_true","pmdec_true","radial_velocity_true"]
 		self.labels_true_ph = [band+"_mag" for band in photometric_args["bands"]]
-		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","dr2_radial_velocity"]
+		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","{0}_radial_velocity".format(release)]
 		self.labels_unc_as  = ["ra_error","dec_error","parallax_error",
-								"pmra_error","pmdec_error","dr2_radial_velocity_error"]
+								"pmra_error","pmdec_error","{0}_radial_velocity_error".format(release)]
 		self.labels_cor_as  = ["ra_dec_corr","ra_parallax_corr","ra_pmra_corr","ra_pmdec_corr",
 							   "dec_parallax_corr","dec_pmra_corr","dec_pmdec_corr",
 							   "parallax_pmra_corr","parallax_pmdec_corr",
 							   "pmra_pmdec_corr"]
 		self.labels_obs_ph  = ["g","bp","rp"]
 		self.labels_unc_ph  = ["g_error","bp_error","rp_error"]
-		self.labels_rvl     = ["dr2_radial_velocity","dr2_radial_velocity_error"]
+		self.labels_rvl     = ["{0}_radial_velocity".format(release),"{0}_radial_velocity_error".format(release)]
 		#--------------------------------------------------------------------------------------------
 
 	def _read_kalkayotl(self,file):
@@ -343,9 +345,9 @@ class Amasijo(object):
 								size=n_faint)
 			#-----------------------------------------------
 
-			#--------- Append ---------------------------------------
-			df_ph = df_ph_mist.append(df_ph_faint,ignore_index=True)
-			#--------------------------------------------------------
+			#--------- Append -------------------------------------------
+			df_ph = pd.concat([df_ph_mist,df_ph_faint],ignore_index=True)
+			#------------------------------------------------------------
 
 		else:
 			df_ph = df_ph_mist
@@ -368,7 +370,6 @@ class Amasijo(object):
 	#======================================================================================
 
 	def _generate_observed_values(self,true,
-				release='dr3',
 				angular_correlations="Lindegren+2020",
 				radial_velocity_gmag_limits=[4.0,13.0]):
 		N = len(true)
@@ -378,7 +379,19 @@ class Amasijo(object):
 		#---- Astrometric and photometric values ------
 		true_as = true.loc[:,self.labels_true_as]
 		true_ph = true.loc[:,["G_mag","BP_mag","RP_mag"]]
-		#-----------------------------------------------
+		#------------------------------------------------
+
+		#-------- G RVS -----------------------------------------------------------------------
+		# https://dms.cosmos.esa.int/COSMOS/doc_fetch.php?id=2760608
+		# file:///home/jolivares/Downloads/GAIA-C5-TN-UB-CJ-041.pdf
+		# G − GRVS = 0.0386 + 0.9457*(BP-RP) - 0.1149*(BP-RP)**2 + 0.0022 (BP-RP)**3 + E(0.06)
+		# GRVS = G - 0.0386 - 0.9457*(BP-RP) + 0.1149*(BP-RP)**2 - 0.0022 (BP-RP)**3
+		true["BP_RP"] = true["BP_mag"] - true["RP_mag"]
+		true["GRVS_mag"] = true.apply(lambda x: 
+			x["G_mag"] - 0.0386 - 0.9457*(x["BP_RP"]) + 
+			0.1149*(x["BP_RP"]**2) - 0.0022+(x["BP_RP"]**3),
+			axis=1)
+		#--------------------------------------------------------------------------------------
 
 		#=================== Angular correlations =========================
 		angular_corr = np.zeros((6*N,6*N))
@@ -411,24 +424,27 @@ class Amasijo(object):
 
 		#================== Uncertainties ================================
 		pos_unc = total_position_uncertainty(true_ph["G_mag"],
-							release=release)
+							release=self.release)
 
 		plx_unc = parallax_uncertainty(true_ph["G_mag"],
-							release=release)
+							release=self.release)
 
 		mua_unc,mud_unc = proper_motion_uncertainty(true_ph["G_mag"], 
-							release=release)
+							release=self.release)
 
-		rvl_unc = vrad_error_sky_avg(true["V_mag"],
-							'B0V',extension=0.0) #FIXME
+		rvl_unc = radial_velocity_uncertainty(grvs=true["GRVS_mag"],
+							teff=true["Teff"],
+							logg=true["logg"],
+							release=self.release)
 
-		g_unc   = g_magnitude_uncertainty(true_ph["G_mag"])
+		g_unc   = magnitude_uncertainty(band="g",maglist=true_ph["G_mag"],
+							release=self.release)
 
-		bp_unc  = bp_magnitude_uncertainty(true_ph["G_mag"],
-							true["V_mag"] - true["I_mag"])
+		bp_unc  = magnitude_uncertainty(band="bp",maglist=true_ph["BP_mag"],
+							release=self.release)
 
-		rp_unc  = rp_magnitude_uncertainty(true_ph["G_mag"], 
-							true["V_mag"] - true["I_mag"])
+		rp_unc  = magnitude_uncertainty(band="rp",maglist=true_ph["RP_mag"], 
+							release=self.release)
 		#------------------------------------------------------------
 
 		#--- Correct units ----
@@ -530,8 +546,7 @@ class Amasijo(object):
 	#================= Generate cluster ==========================
 	def generate_cluster(self,file,n_stars=100,
 						angular_correlations="Vasiliev+2019",
-						index_label="source_id",
-						release='dr3'):
+						index_label="source_id"):
 
 		if hasattr(self,"mcluster_args"):
 			#--------------- Generate McLuster file ------------
@@ -615,7 +630,6 @@ class Amasijo(object):
 		#------------- Observed values ----------------------------
 		print("Generating observed values ...")
 		df_obs = self._generate_observed_values(df_true,
-						release=release,
 						angular_correlations=angular_correlations)
 		#----------------------------------------------------------
 
@@ -880,9 +894,8 @@ if __name__ == "__main__":
 
 	seed      = 1
 	n_stars   = 1000
-	dir_main  = "/home/jolivares/Cumulos/ComaBer/Kalkayotl/mecayotl/iter_0/CGMM_central/"
-	# dir_main  = "/home/jolivares/Cumulos/ComaBer/Kalkayotl/Furnkranz+2019/Gaussian_central/"
-	base_name = "ComaBer_n{0}".format(n_stars)
+	dir_main  = "/home/jolivares/OCs/TWH/Mecayotl/runs/iter_0/Kalkayotl/Gaussian_central/"
+	base_name = "TWH_n{0}".format(n_stars)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
 	
@@ -894,22 +907,14 @@ if __name__ == "__main__":
 					"location":np.array([0.0,0.0,0.0]),
 					"covariance":np.diag([1.,1.,1.])}}
 
-	# photometric_args = {
-	# 					"log_age": 8.845,    
-	# 					"metallicity":0.012,
-	# 					"Av": 0.0,         
-	# 					"mass_limits":[0.01,2.6], 
-	# 					"bands":["V","I","G","BP","RP"],
-	# 					"mass_prior":"Uniform"
-	# 					}
 	photometric_args = {
-						"log_age": 8.47,    
-						"metallicity":0.0196,
-						"Av": 0.0,         
-						"mass_limits":[0.01,3.4], 
-						"bands":["V","I","G","BP","RP"],
-						"mass_prior":"Uniform"
-						}
+	"log_age": 7.0,    
+	"metallicity":0.012,
+	"Av": 0.0,         
+	"mass_limits":[0.01,2.5], 
+	"bands":["G","BP","RP"],
+	"mass_prior":"Uniform"
+	}
 
 	mcluster_args = {
 		"path":"/home/jolivares/Repos/mcluster/",
