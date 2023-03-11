@@ -359,7 +359,7 @@ class Amasijo(object):
 		idx_bad = np.where(bad)[0]
 		#---------------------------------------------------------------------------------------
 
-		if len(idx) > 0:
+		if len(idx_bad) > 0:
 			bad = masses[idx_bad]
 			msg_error = "ERROR: Modify the mass interval!\n" + \
 			"Stars are being generated outside the PyGaia limits [4,21]\n" +\
