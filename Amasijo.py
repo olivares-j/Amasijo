@@ -13,7 +13,7 @@ from Functions import AngularSeparation,covariance_parallax,covariance_proper_mo
 from distributions import mveff,mvking
 
 from pygaia.astrometry.vectorastrometry import phase_space_to_astrometry
-from pygaia.errors.astrometric import parallax_uncertainty,total_position_uncertainty,proper_motion_uncertainty
+from pygaia.errors.astrometric import parallax_uncertainty,position_uncertainty,proper_motion_uncertainty
 from pygaia.errors.photometric import magnitude_uncertainty
 from pygaia.errors.spectroscopic import radial_velocity_uncertainty
 
@@ -370,8 +370,9 @@ class Amasijo(object):
 	#======================================================================================
 
 	def _generate_observed_values(self,true,
-				angular_correlations="Lindegren+2020",
-				radial_velocity_gmag_limits=[4.0,13.0]):
+				angular_correlations="Lindegren+2020"
+				):
+
 		N = len(true)
 
 		rng = np.random.default_rng()
@@ -423,7 +424,7 @@ class Amasijo(object):
 		#=====================================================================
 
 		#================== Uncertainties ================================
-		pos_unc = total_position_uncertainty(true_ph["G_mag"],
+		ra_unc,dec_unc = position_uncertainty(true_ph["G_mag"],
 							release=self.release)
 
 		plx_unc = parallax_uncertainty(true_ph["G_mag"],
@@ -448,22 +449,34 @@ class Amasijo(object):
 		#------------------------------------------------------------
 
 		#--- Correct units ----
-		pos_unc *= 1e-3
+		# Micro to mili arcsec
+		ra_unc  *= 1e-3
+		dec_unc *= 1e-3
 		plx_unc *= 1e-3
 		mua_unc *= 1e-3
 		mud_unc *= 1e-3
+		# mmag to mag
+		g_unc   *= 1e-3
+		bp_unc  *= 1e-3
+		rp_unc  *= 1e-3
 		#----------------------
 
 		#------ Stack values ------------------------------
-		unc_as = np.column_stack((pos_unc,pos_unc,plx_unc,
+		unc_as = np.column_stack((ra_unc,dec_unc,plx_unc,
 								  mua_unc,mud_unc,rvl_unc))
 		unc_ph = np.column_stack((g_unc,bp_unc,rp_unc))
 		#---------------------------------------------------
 		#==================================================================
 
 		#======= Astrometry =================================
-		#------ Covariance ---------------
 		u_as = unc_as.copy()
+
+		#-------------- Missing rvel -----------------
+		idx_nan_rvl = np.where(np.isnan(rvl_unc))[0]
+		u_as[idx_nan_rvl,5] = 99
+		#--------------------------------------------
+
+		#------ Covariance ---------------
 		# Uncertainty must be in same units as value
 		u_as[:,0] /= 3.6e6 # mas to degrees
 		u_as[:,1] /= 3.6e6 # mas to degrees
@@ -480,6 +493,10 @@ class Amasijo(object):
 					method='cholesky',
 					size=1).reshape((N,6))
 		#---------------------------------------------
+
+		#-- Replace nan rvel by nan -------
+		obs_as[idx_nan_rvl,5] = np.nan
+		#--------------------------------
 
 		#--------- Data Frames ------------------
 		df_obs_as = pd.DataFrame(data=obs_as,
@@ -522,12 +539,6 @@ class Amasijo(object):
 
 		#------- Join ------------
 		df_obs = df_as.join(df_ph)
-
-		#--------- Radial velocity limits ---------------------
-		mask  = df_obs['g'] < radial_velocity_gmag_limits[0] 
-		mask |= df_obs['g'] > radial_velocity_gmag_limits[1]
-		df_obs.loc[mask,self.labels_rvl] = np.nan
-		#------------------------------------------------------
 
 		#------- Set index -------
 		df_obs.set_index(true.index,inplace=True)
