@@ -64,7 +64,7 @@ class Amasijo(object):
 			case = "McLuster"
 		elif kalkayotl_args is not None:
 			assert os.path.exists(kalkayotl_args["file"]), "Input Kalkayotl file does not exists!"
-			self.astrometric_args = self._read_kalkayotl(kalkayotl_file)
+			self.astrometric_args = self._read_kalkayotl(kalkayotl_args["file"])
 			case = "Kalkayotl"
 		else:
 			sys.exit("You must provide astrometric_args, mcluster_args or a Kalkayotl_args!")
