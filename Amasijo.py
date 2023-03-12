@@ -12,14 +12,16 @@ from scipy.interpolate import splrep,splev
 from Functions import AngularSeparation,covariance_parallax,covariance_proper_motion
 from distributions import mveff,mvking
 
-from pygaia.astrometry.vectorastrometry import phase_space_to_astrometry
 from pygaia.errors.astrometric import parallax_uncertainty,position_uncertainty,proper_motion_uncertainty
 from pygaia.errors.photometric import magnitude_uncertainty
 from pygaia.errors.spectroscopic import radial_velocity_uncertainty
 
+from pygaia.astrometry.vectorastrometry import astrometry_to_phase_space,phase_space_to_astrometry
+from pygaia.astrometry.coordinates import CoordinateTransformation
+from pygaia.astrometry.coordinates import Transformations 
+
 from isochrones import get_ichrone
 from isochrones.priors import ChabrierPrior
-
 
 ###############################################################################
 class Amasijo(object):
@@ -28,7 +30,10 @@ class Amasijo(object):
 	def __init__(self,photometric_args,
 					astrometric_args=None,
 					mcluster_args=None,
-					kalkayotl_file=None,
+					reference_system="Galactic",
+					kalkayotl_args={
+					"file":None,
+					"velocity_model":"joint"},
 					release="dr3",
 					seed=1234):
 
@@ -37,7 +42,11 @@ class Amasijo(object):
 		self.random_state = np.random.RandomState(seed=seed)
 		self.seed = seed
 		self.release = release
-		#---------------------------------------------------
+		self.reference_system = reference_system
+		self.velocity_model = kalkayotl_args["velocity_model"]
+		#-----------------------------------------------------
+
+		assert reference_system in ["Galactic","ICRS"], "ERROR:reference_system must be Galactic or ICRS"
 
 		#--------------- Tracks ----------------------------
 		self.tracks = get_ichrone('mist', tracks=True,
@@ -53,12 +62,12 @@ class Amasijo(object):
 		elif mcluster_args is not None:
 			self.mcluster_args = mcluster_args
 			case = "McLuster"
-		elif kalkayotl_file is not None:
-			assert os.path.exists(kalkayotl_file), "Input Kalkayotl file does not exists!"
+		elif kalkayotl_args is not None:
+			assert os.path.exists(kalkayotl_args["file"]), "Input Kalkayotl file does not exists!"
 			self.astrometric_args = self._read_kalkayotl(kalkayotl_file)
 			case = "Kalkayotl"
 		else:
-			sys.exit("You must provide astrometric_args, mcluster_args or a Kalkayotl file!")
+			sys.exit("You must provide astrometric_args, mcluster_args or a Kalkayotl_args!")
 
 		print("Astrometry will be generated from the provided {0} arguments!".format(case))
 		#-----------------------------------------------------------------------------------
@@ -288,10 +297,23 @@ class Amasijo(object):
 		return XYZUVW
 
 	def _generate_true_astrometry(self,X):
-		#------- Astrometry & Radial velocity --------------------
-		ra,dec,plx,mua,mud,rvel = phase_space_to_astrometry(
-						X[:,0],X[:,1],X[:,2],X[:,3],X[:,4],X[:,5])
-		#---------------------------------------------------------
+
+		#--------------  Galactic to ICRS --------------------------------
+		if self.reference_system == "Galactic":
+			GAL2ICRS = CoordinateTransformation(Transformations.GAL2ICRS)
+
+			x,y,z = GAL2ICRS.transform_cartesian_coordinates(
+							X[:,0],X[:,1],X[:,2])
+			u,v,w = GAL2ICRS.transform_cartesian_coordinates(
+							X[:,3],X[:,4],X[:,5])
+		else:
+			x,y,z,u,v,w = X[:,0],X[:,1],X[:,2],X[:,3],X[:,4],X[:,5]
+		
+		#-----------------------------------------------------------------
+		
+		#------- Astrometry & Radial velocity ---------------------------
+		ra,dec,plx,mua,mud,rvel = phase_space_to_astrometry(x,y,z,u,v,w)
+		#----------------------------------------------------------------
 
 		#----- Transform ----------------------
 		ra   = np.rad2deg(ra)       # In degrees
@@ -965,8 +987,11 @@ if __name__ == "__main__":
 	ama = Amasijo(
 				# astrometric_args=astrometric_args,
 				# mcluster_args=mcluster_args,
-				kalkayotl_file=kalkayotl_file,
+				kalkayotl_args={
+				"file":kalkayotl_file,
+				"velocity_model":"joint"},
 				photometric_args=photometric_args,
+				reference_system="Galactic",
 				seed=seed)
 
 	ama.generate_cluster(file_data,n_stars=n_stars)
