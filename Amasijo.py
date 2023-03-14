@@ -378,16 +378,15 @@ class Amasijo(object):
 		bad =  (df_ph["G_mag"]  >21.0) | (df_ph["G_mag"]  <4.0) | np.isnan(df_ph["G_mag"])  | \
 			   (df_ph["BP_mag"] >21.0) | (df_ph["BP_mag"] <4.0) | np.isnan(df_ph["BP_mag"]) | \
 			   (df_ph["RP_mag"] >21.0) | (df_ph["RP_mag"] <4.0) | np.isnan(df_ph["RP_mag"]) 
-		idx_bad = np.where(bad)[0]
 		#---------------------------------------------------------------------------------------
 
-		if len(idx_bad) > 0:
+		if sum(bad) > 0:
 			msg_error = "ERROR: Modify the mass interval!\n" + \
 			"Stars are being generated outside the PyGaia limits [4,21]\n" +\
 			"or above MIST photometric limits!"
 			print(msg_error)
 			print("Bad photometric sources:")
-			print(df_ph.iloc[idx_bad])
+			print(df_ph.loc[bad,["G_mag","BP_mag","RP_mag","mass"]])
 			sys.exit()
 		#--------------------------------------------------------------------
 
