@@ -90,16 +90,16 @@ class Amasijo(object):
 		self.labels_rvl     = ["{0}_radial_velocity".format(release),"{0}_radial_velocity_error".format(release)]
 		#--------------------------------------------------------------------------------------------
 
-	def _read_kalkayotl(self,file):
+	def _read_kalkayotl(self,file,statistic="MAP"):
 		#-------- Read file ----------------------------------
-		param = pd.read_csv(file,usecols=["Parameter","mode"])
+		param = pd.read_csv(file,usecols=["Parameter",statistic])
 		#-----------------------------------------------------
 
 		if any(param["Parameter"].str.contains("weights")):
 			#===================== GMM and CGMM =======================================
 
 			#--------- Weights -------------------------------------------------------
-			wghs = param.loc[param["Parameter"].str.contains("weights"),"mode"].values
+			wghs = param.loc[param["Parameter"].str.contains("weights"),statistic].values
 			#------------------------------------------------------------------------
 
 			#------------- Location ----------------------------------
@@ -113,12 +113,12 @@ class Amasijo(object):
 				for i in range(len(wghs)):
 					selection = loc["Parameter"].str.contains(
 								"[{0}]".format(i),regex=False)
-					locs.append(loc.loc[selection,"mode"].values)
+					locs.append(loc.loc[selection,statistic].values)
 				#---------------------------------------------------------
 			else:
 				#-------------- CGMM -------------------------------------------------
 				family = "CGMM"
-				loc = param.loc[param["Parameter"].str.contains("loc"),"mode"].values
+				loc = param.loc[param["Parameter"].str.contains("loc"),statistic].values
 				locs = [loc for w in wghs]
 				#---------------------------------------------------------------------
 
@@ -137,8 +137,8 @@ class Amasijo(object):
 				#-----------------------------------------------
 
 				#------Extract parameters -------------------
-				std = scl.loc[mask_std,"mode"].values
-				cor = scl.loc[mask_cor,"mode"].values
+				std = scl.loc[mask_std,statistic].values
+				cor = scl.loc[mask_cor,statistic].values
 				#--------------------------------------------
 
 				stds.append(std)
@@ -166,10 +166,10 @@ class Amasijo(object):
 		else:
 			#=================== Gaussian ===========================================
 			#---- Extract parameters ------------------------------------------------
-			loc  = param.loc[param["Parameter"].str.contains("loc"),"mode"].values
+			loc  = param.loc[param["Parameter"].str.contains("loc"),statistic].values
 			param.fillna(value=1.0,inplace=True)
-			stds = param.loc[param["Parameter"].str.contains('stds'),"mode"].values
-			corr = param.loc[param["Parameter"].str.contains('corr'),"mode"].values
+			stds = param.loc[param["Parameter"].str.contains('stds'),statistic].values
+			corr = param.loc[param["Parameter"].str.contains('corr'),statistic].values
 			#------------------------------------------------------------------------
 
 			#---- Construct covariance --------------
