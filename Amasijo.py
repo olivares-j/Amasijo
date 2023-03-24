@@ -375,26 +375,25 @@ class Amasijo(object):
 			df_ph = df_ph_mist
 
 		#------- Assert valid magnitude and masses ------------------------------------------------
-		bad =  (df_ph["G_mag"]  >21.0) | (df_ph["G_mag"]  <4.0) | np.isnan(df_ph["G_mag"])  | \
-			   (df_ph["BP_mag"] >21.0) | (df_ph["BP_mag"] <4.0) | np.isnan(df_ph["BP_mag"]) | \
-			   (df_ph["RP_mag"] >21.0) | (df_ph["RP_mag"] <4.0) | np.isnan(df_ph["RP_mag"]) 
+		bad =  (df_ph["G_mag"] > 21.0) | (df_ph["G_mag"] < 4.0) | np.isnan(df_ph["G_mag"])  #| \
+			   # (df_ph["BP_mag"] >21.0) | (df_ph["BP_mag"] <4.0) | np.isnan(df_ph["BP_mag"]) | \
+			   # (df_ph["RP_mag"] >21.0) | (df_ph["RP_mag"] <4.0) | np.isnan(df_ph["RP_mag"]) 
 		#---------------------------------------------------------------------------------------
 
 		if sum(bad) > 0:
-			msg_error = "ERROR: Modify the mass interval!\n" + \
-			"Stars are being generated outside the PyGaia limits [4,21]\n" +\
+			msg_error = "WARNING: Stars are being generated outside the PyGaia limits [4,21]\n" +\
 			"or above MIST photometric limits!"
 			print(msg_error)
 			print("Bad photometric sources:")
-			print(df_ph.loc[bad,["G_mag","BP_mag","RP_mag","mass"]])
-			sys.exit()
+			print(df_ph.loc[bad,["G_mag","mass"]])
 		#--------------------------------------------------------------------
 
 		return df_ph
 	#======================================================================================
 
 	def _generate_observed_values(self,true,
-				angular_correlations="Lindegren+2020"
+				angular_correlations="Lindegren+2020",
+				soil_mag_uncertainty=1.0
 				):
 
 		N = len(true)
@@ -434,14 +433,32 @@ class Amasijo(object):
 							teff=true_sp["Teff"],
 							logg=true_sp["logg"],
 							release=self.release)
+		g_unc  = np.full(N,fill_value=soil_mag_uncertainty)
+		bp_unc = np.full(N,fill_value=soil_mag_uncertainty)
+		rp_unc = np.full(N,fill_value=soil_mag_uncertainty)
 
-		g_unc   = magnitude_uncertainty(band="g",maglist=true_ph["G_mag"],
+		idx_g = np.where(
+			(true_ph["G_mag"] > 4.0) & 
+			(true_ph["G_mag"] < 21.0))[0]
+
+		idx_bp = np.where(
+			(true_ph["BP_mag"] > 4.0) & 
+			(true_ph["BP_mag"] < 21.0))[0]
+
+		idx_rp = np.where(
+			(true_ph["RP_mag"] > 4.0) & 
+			(true_ph["RP_mag"] < 21.0))[0]
+
+		g_unc[idx_g]   = magnitude_uncertainty(band="g",
+								maglist=true_ph["G_mag"][idx_g],
+								release=self.release)
+
+		bp_unc[idx_bp]  = magnitude_uncertainty(band="bp",
+							maglist=true_ph["BP_mag"][idx_bp],
 							release=self.release)
 
-		bp_unc  = magnitude_uncertainty(band="bp",maglist=true_ph["BP_mag"],
-							release=self.release)
-
-		rp_unc  = magnitude_uncertainty(band="rp",maglist=true_ph["RP_mag"], 
+		rp_unc[idx_rp]  = magnitude_uncertainty(band="rp",
+							maglist=true_ph["RP_mag"][idx_rp], 
 							release=self.release)
 		del true_sp
 		#------------------------------------------------------------
@@ -951,9 +968,9 @@ class Amasijo(object):
 
 if __name__ == "__main__":
 
-	seed      = 9
+	seed      = 0
 	n_stars   = int(1e3)
-	dir_main  = "/home/jolivares/OCs/TWH/Mecayotl/runs/iter_0/Kalkayotl/Gaussian_central/"
+	dir_main  = "/home/jolivares/OCs/TWH/Mecayotl/iter_0/Kalkayotl/Gaussian/"
 	base_name = "TWH_n{0}".format(n_stars)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
@@ -970,7 +987,7 @@ if __name__ == "__main__":
 	"log_age": 7.0,    
 	"metallicity":0.012,
 	"Av": 0.0,         
-	"mass_limits":[0.01,2.5], 
+	"mass_limits":[0.001,2.5], 
 	"bands":["G","BP","RP"],
 	"mass_prior":"Uniform"
 	}
@@ -993,7 +1010,7 @@ if __name__ == "__main__":
 				reference_system="Galactic",
 				seed=seed)
 
-	ama.generate_cluster(file_data,n_stars=n_stars)
+	ama.generate_cluster(file_data,n_stars=n_stars,angular_correlations=None)
 
 	ama.plot_cluster(file_plot=file_plot)
 
