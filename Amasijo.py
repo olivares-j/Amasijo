@@ -203,7 +203,8 @@ class Amasijo(object):
 							size=n_stars)
 
 			elif self.astrometric_args["position+velocity"]["family"] in ["GMM", "CGMM"]:
-				assert np.sum(join_args["weights"]) == 1.0,"weights must be a simplex"
+				np.testing.assert_almost_equal(np.sum(join_args["weights"]),1.0,
+						err_msg="ERROR: sum of weights must be 1.0. It is ",verbose=True)
 				n_cmp = len(join_args["weights"])
 				n_stars_cmp = np.floor(join_args["weights"]*n_stars).astype('int')
 				n_res = n_stars - np.sum(n_stars_cmp)
