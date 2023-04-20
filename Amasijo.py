@@ -35,6 +35,7 @@ class Amasijo(object):
 					"file":None,
 					"velocity_model":"joint"},
 					release="dr3",
+					label_radial_velocity="dr3_radial_velocity",
 					seed=1234):
 
 		#------ Set Seed -----------------------------------
@@ -76,19 +77,19 @@ class Amasijo(object):
 		#------- Labels ----------------------------------------------------------------------------------
 		self.labels_phase_space = ["X","Y","Z","U","V","W"]
 		self.labels_true_as = ["ra_true","dec_true","parallax_true",
-								"pmra_true","pmdec_true","radial_velocity_true"]
+								"pmra_true","pmdec_true","{0}_true".format(label_radial_velocity)]
 		self.labels_true_ph = [band+"_mag" for band in photometric_args["bands"]]
-		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","{0}_radial_velocity".format(release)]
-		self.labels_unc_as  = ["ra_error","dec_error","parallax_error",
-								"pmra_error","pmdec_error","{0}_radial_velocity_error".format(release)]
 		self.labels_cor_as  = ["ra_dec_corr","ra_parallax_corr","ra_pmra_corr","ra_pmdec_corr",
 							   "dec_parallax_corr","dec_pmra_corr","dec_pmdec_corr",
 							   "parallax_pmra_corr","parallax_pmdec_corr",
 							   "pmra_pmdec_corr"]
 		self.labels_obs_ph  = ["g","bp","rp"]
 		self.labels_unc_ph  = ["g_error","bp_error","rp_error"]
-		self.labels_rvl     = ["{0}_radial_velocity".format(release),"{0}_radial_velocity_error".format(release)]
-		#--------------------------------------------------------------------------------------------
+		self.labels_rvl     = ["{0}".format(label_radial_velocity),"{0}_error".format(label_radial_velocity)]
+		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","{0}".format(label_radial_velocity)]
+		self.labels_unc_as  = ["ra_error","dec_error","parallax_error",
+								"pmra_error","pmdec_error","{0}_error".format(label_radial_velocity)]
+		#-----------------------------------------------------------------------------------------------------
 
 	def _read_kalkayotl(self,file,statistic="MAP"):
 		#-------- Read file ----------------------------------
