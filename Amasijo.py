@@ -2,6 +2,7 @@ import sys
 import os
 import numpy  as np
 import pandas as pd
+import string
 import scipy.stats as st
 from time import time
 from subprocess import call
@@ -99,21 +100,24 @@ class Amasijo(object):
 		if any(param["Parameter"].str.contains("weights")):
 			#===================== GMM and CGMM =======================================
 
-			#--------- Weights -------------------------------------------------------
+			#--------- Weights -----------------------------------------------------------
 			wghs = param.loc[param["Parameter"].str.contains("weights"),statistic].values
-			#------------------------------------------------------------------------
+			#-----------------------------------------------------------------------------
+
+			n_components = len(wghs)
+			names_components = list(string.ascii_uppercase)[:n_components]
 
 			#------------- Location ----------------------------------
 			loc = param[param["Parameter"].str.contains("loc")]
 
 
-			if loc.shape[0]/len(wghs) == 6:
+			if loc.shape[0]/n_components == 6:
 				#------------- GMM ------------------------------------
 				family = "GMM"
 				locs = []
-				for i in range(len(wghs)):
+				for c in names_components:
 					selection = loc["Parameter"].str.contains(
-								"[{0}]".format(i),regex=False)
+								"{0}".format(c),regex=False)
 					locs.append(loc.loc[selection,statistic].values)
 				#---------------------------------------------------------
 			else:
@@ -129,12 +133,12 @@ class Amasijo(object):
 			stds = []
 			cors = []
 			covs = []
-			for i in range(len(wghs)):
+			for c in names_components:
 				#---------- Select component parameters --------
 				mask_std = scl["Parameter"].str.contains(
-							"{0}_stds".format(i),regex=False)
+							"stds[{0}".format(c),regex=False)
 				mask_cor = scl["Parameter"].str.contains(
-							"{0}_corr".format(i),regex=False)
+							"corr[{0}".format(c),regex=False)
 				#-----------------------------------------------
 
 				#------Extract parameters -------------------
