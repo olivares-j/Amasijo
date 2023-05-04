@@ -136,7 +136,7 @@ class Amasijo(object):
 			for c in names_components:
 				#---------- Select component parameters --------
 				mask_std = scl["Parameter"].str.contains(
-							"stds[{0}".format(c),regex=False)
+							"std[{0}".format(c),regex=False)
 				mask_cor = scl["Parameter"].str.contains(
 							"corr[{0}".format(c),regex=False)
 				#-----------------------------------------------
@@ -173,7 +173,7 @@ class Amasijo(object):
 			#---- Extract parameters ------------------------------------------------
 			loc  = param.loc[param["Parameter"].str.contains("loc"),statistic].values
 			param.fillna(value=1.0,inplace=True)
-			stds = param.loc[param["Parameter"].str.contains('stds'),statistic].values
+			stds = param.loc[param["Parameter"].str.contains('std'),statistic].values
 			corr = param.loc[param["Parameter"].str.contains('corr'),statistic].values
 			#------------------------------------------------------------------------
 
