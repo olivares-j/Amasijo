@@ -33,8 +33,7 @@ class Amasijo(object):
 					mcluster_args=None,
 					reference_system="Galactic",
 					kalkayotl_args={
-					"file":None,
-					"velocity_model":"joint"},
+					"file":None},
 					release="dr3",
 					label_radial_velocity="dr3_radial_velocity",
 					seed=1234):
@@ -45,7 +44,6 @@ class Amasijo(object):
 		self.seed = seed
 		self.release = release
 		self.reference_system = reference_system
-		self.velocity_model = kalkayotl_args["velocity_model"]
 		#-----------------------------------------------------
 
 		assert reference_system in ["Galactic","ICRS"], "ERROR:reference_system must be Galactic or ICRS"
@@ -93,11 +91,20 @@ class Amasijo(object):
 		#-----------------------------------------------------------------------------------------------------
 
 	def _read_kalkayotl(self,file,statistic="MAP"):
-		#-------- Read file ----------------------------------
+		#-------- Read file -------------------------------------
 		param = pd.read_csv(file,usecols=["Parameter",statistic])
-		#-----------------------------------------------------
+		#--------------------------------------------------------
 
-		if any(param["Parameter"].str.contains("weights")):
+		has_UVW = any(param["Parameter"].str.contains("U")) &\
+				  any(param["Parameter"].str.contains("V")) &\
+				  any(param["Parameter"].str.contains("W"))
+		assert has_UVW, "ERROR: The Kalkayotl file does not contains velocities UVW"
+
+		is_mixture = any(param["Parameter"].str.contains("weights"))
+
+		is_linear = any(param["Parameter"].str.contains("kappa"))
+
+		if is_mixture:
 			#===================== GMM and CGMM =======================================
 
 			#--------- Weights -----------------------------------------------------------
@@ -168,29 +175,137 @@ class Amasijo(object):
 					"covariance":covs}
 				}
 			#========================================================================
-		else:
-			#=================== Gaussian ===========================================
+
+		#=================== Student T =================================================
+		elif any(param["Parameter"].str.contains("nu")):
+			
 			#---- Extract parameters ------------------------------------------------
 			loc  = param.loc[param["Parameter"].str.contains("loc"),statistic].values
+			std  = param.loc[param["Parameter"].str.contains('std'),statistic].values
+			nu   = param.loc[param["Parameter"].str.contains('nu'),statistic].values
+			#-------------------------------------------------------------------------
+
 			param.fillna(value=1.0,inplace=True)
-			stds = param.loc[param["Parameter"].str.contains('std'),statistic].values
-			corr = param.loc[param["Parameter"].str.contains('corr'),statistic].values
+
+			if is_linear:
+				kappa = param.loc[param["Parameter"].str.contains("kappa"),statistic].values
+
+				if param["Parameter"].str.contains("omega"):
+					omega = param.loc[param["Parameter"].str.contains("omega"),statistic].values
+				else:
+					omega = np.zeros((2,3))
+
+				#---------------------- Extract -------------------------------------------
+				corr_pos = param.loc[param["Parameter"].str.contains('corr_pos'),statistic].values
+				corr_vel = param.loc[param["Parameter"].str.contains('corr_vel'),statistic].values
+				#------------------------------------------------------------------------
+
+				#---- Construct covariance ---------
+				std_pos = np.diag(std[:3])
+				std_vel = np.diag(std[3:])
+				corr_pos = np.reshape(corr_pos,(3,3))
+				corr_vel = np.reshape(corr_vel,(3,3))
+				cov_pos  = np.dot(std_pos,corr_pos.dot(std_pos))
+				cov_vel  = np.dot(std_vel,corr_vel.dot(std_vel))
+				#----------------------------------
+
+				astrometric_args = {
+				"position":{
+						"family":"StudentT",
+						"nu":nu,
+						"location":loc[:3],
+						"covariance":cov_pos},
+				"velocity":{
+						"family":"StudentT",
+						"nu":nu,
+						"location":loc[3:],
+						"covariance":cov_vel,
+						"kappa":kappa,
+						"omega":omega}
+						}
+			else:
+				#---------------------- Extract -------------------------------------------
+				std = param.loc[param["Parameter"].str.contains('std'),statistic].values
+				corr = param.loc[param["Parameter"].str.contains('corr'),statistic].values
+				#------------------------------------------------------------------------
+
+				#---- Construct covariance ---------
+				std  = np.diag(std)
+				corr = np.reshape(corr,(6,6))
+				cov  = np.dot(std,corr.dot(std))
+				#----------------------------------
+
+				astrometric_args = {
+				"position+velocity":{
+						"family":"StudentT",
+						"nu":nu,
+						"location":loc,
+						"covariance":cov}
+					}
+		#================================================================================
+
+		else:
+		#=================== Gaussian ====================================================
+			#---- Extract parameters ------------------------------------------------
+			loc  = param.loc[param["Parameter"].str.contains("loc"),statistic].values
+			std  = param.loc[param["Parameter"].str.contains('std'),statistic].values
 			#------------------------------------------------------------------------
 
-			#---- Construct covariance --------------
-			stds = np.diag(stds)
-			corr = np.reshape(corr,(6,6))
-			cov  = np.dot(stds,corr.dot(stds))
-			#-----------------------------------------
+			param.fillna(value=1.0,inplace=True)
 
-			astrometric_args = {
-			"position+velocity":{
-					"family":"Gaussian",
-					"location":loc,
-					"covariance":cov}
-				}
+			if is_linear:
+				kappa = param.loc[param["Parameter"].str.contains("kappa"),statistic].values
+
+				if any(param["Parameter"].str.contains("omega")):
+					omega = param.loc[param["Parameter"].str.contains("omega"),statistic].values
+					omega = omega.reshape((2,3))
+				else:
+					omega = np.zeros((2,3))
+
+				#---------------------- Extract correlations -------------------------------------
+				corr_pos = param.loc[param["Parameter"].str.contains('corr_pos'),statistic].values
+				corr_vel = param.loc[param["Parameter"].str.contains('corr_vel'),statistic].values
+				#---------------------------------------------------------------------------------
+
+				#---- Construct covariance ---------
+				std_pos = np.diag(std[:3])
+				std_vel = np.diag(std[3:])
+				corr_pos = np.reshape(corr_pos,(3,3))
+				corr_vel = np.reshape(corr_vel,(3,3))
+				cov_pos  = np.dot(std_pos,corr_pos.dot(std_pos))
+				cov_vel  = np.dot(std_vel,corr_vel.dot(std_vel))
+				#----------------------------------
+
+				astrometric_args = {
+				"position":{
+						"family":"Gaussian",
+						"location":loc[:3],
+						"covariance":cov_pos},
+				"velocity":{
+						"family":"Gaussian",
+						"location":loc[3:],
+						"covariance":cov_vel,
+						"kappa":kappa,
+						"omega":omega}
+						}
+			else:
+				#---------------------- Extract -------------------------------------------
+				corr = param.loc[param["Parameter"].str.contains('corr'),statistic].values
+				#------------------------------------------------------------------------
+
+				#---- Construct covariance ---------
+				std  = np.diag(std)
+				corr = np.reshape(corr,(6,6))
+				cov  = np.dot(std,corr.dot(std))
+				#----------------------------------
+
+				astrometric_args = {
+				"position+velocity":{
+						"family":"Gaussian",
+						"location":loc,
+						"covariance":cov}
+					}
 			#==========================================================================
-
 		return astrometric_args
 
 	#====================== Generate Astrometric Data ==================================================
@@ -238,20 +353,22 @@ class Amasijo(object):
 			msg_1 = "Error in position arguments: family {0} is not implemented".format(position_args["family"]) 
 
 			assert len(position_args["location"]) == len(position_args["covariance"]), msg_0
-			assert position_args["family"] in ["Gaussian","EFF","King","GMM"], msg_1
+			assert position_args["family"] in ["Gaussian","StudentT","GMM"], msg_1
+			#===================================================================================================
 
 			#=============================== Positions ========================================================
 			if position_args["family"] == "Gaussian":
-				XYZ = st.multivariate_normal.rvs(mean=position_args["location"],cov=position_args["covariance"],
-													size=n_stars)
+				XYZ = st.multivariate_normal.rvs(
+												mean=position_args["location"],
+												cov=position_args["covariance"],
+												size=n_stars)
 
-			elif position_args["family"] == "EFF":
-				XYZ = mveff.rvs(loc=position_args["location"],scale=position_args["covariance"],
-								gamma=position_args["gamma"],size=n_stars)
-
-			elif position_args["family"] == "King":
-				XYZ = mvking.rvs(loc=position_args["location"],scale=position_args["covariance"],
-								rt=position_args["tidal_radius"],size=n_stars)
+			elif position_args["family"] == "StudentT":
+				XYZ = st.multivariate_t.rvs(
+											loc=position_args["location"],
+											scale=position_args["covariance"],
+											df=position_args["nu"],
+											size=n_stars)
 
 			elif position_args["family"] == "GMM":
 				assert np.sum(position_args["weights"]) == 1.0,"weights must be a simplex"
@@ -273,10 +390,18 @@ class Amasijo(object):
 				sys.exit("Error: incorrect position family argument")
 			#===============================================================================================
 
-			#=============================== Velocities ========================================================
+			#=============================== Velocities ========================================
 			if velocity_args["family"] == "Gaussian":
-				UVW = st.multivariate_normal.rvs(mean=velocity_args["location"],cov=velocity_args["covariance"],
-													size=n_stars)
+				UVW = st.multivariate_normal.rvs(mean=velocity_args["location"],
+												cov=velocity_args["covariance"],
+												size=n_stars)
+
+			elif velocity_args["family"] == "StudentT":
+				UVW = st.multivariate_t.rvs(
+									loc=velocity_args["location"],
+									scale=velocity_args["covariance"],
+									df=velocity_args["nu"],
+									size=n_stars)
 
 			elif velocity_args["family"] == "GMM":
 				assert np.sum(velocity_args["weights"]) == 1.0,"weights must be a simplex"
@@ -296,6 +421,20 @@ class Amasijo(object):
 
 			else:
 				sys.exit("Error: incorrect velocity family argument")
+
+
+			if "kappa" in velocity_args:
+				lnv = np.zeros((3,3))
+
+				lnv[np.diag_indices(3)]    = velocity_args["kappa"]
+				lnv[np.triu_indices(3,1)]  = velocity_args["omega"][0]
+				lnv[np.tril_indices(3,-1)] = velocity_args["omega"][1]
+
+				offset_pos = XYZ - position_args["location"]
+
+				offset_vel = np.dot(offset_pos,lnv)
+
+				UVW += offset_vel
 			#===============================================================================================
 
 			XYZUVW = np.hstack((XYZ,UVW))
@@ -490,7 +629,7 @@ class Amasijo(object):
 		#==================================================================
 
 		#================= Astrometry =================================
-		#-------------- Missing rvel -----------------
+		#-------------- Missing rvel ----------------
 		idx_nan_rvl = np.where(np.isnan(rvl_unc))[0]
 		unc_as[idx_nan_rvl,5] = 99
 		#--------------------------------------------
@@ -891,7 +1030,7 @@ class Amasijo(object):
 					bins=n_bins,histtype="step",
 					color=cases["observed"]["color"],
 					label=cases["observed"]["label"])
-		plt.hist(self.df["radial_velocity_true"],density=False,
+		plt.hist(self.df[self.labels_rvl[0]+"_true"],density=False,
 					bins=n_bins,histtype="step",
 					color=cases["true"]["color"],
 					label=cases["true"]["label"])
@@ -975,9 +1114,9 @@ class Amasijo(object):
 if __name__ == "__main__":
 
 	seed      = 0
-	n_stars   = int(1e3)
-	dir_main  = "/home/jolivares/OCs/TWH/Mecayotl/iter_0/Kalkayotl/Gaussian/"
-	base_name = "TWH_n{0}".format(n_stars)
+	n_stars   = int(5e1)
+	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Gaussian_Galactic_linear/"
+	base_name = "Gaussian_n{0}".format(n_stars)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
 	
@@ -990,7 +1129,7 @@ if __name__ == "__main__":
 					"covariance":np.diag([1.,1.,1.])}}
 
 	photometric_args = {
-	"log_age": 7.0,    
+	"log_age": 8.0,    
 	"metallicity":0.012,
 	"Av": 0.0,         
 	"mass_limits":[0.001,2.5], 
@@ -1009,11 +1148,10 @@ if __name__ == "__main__":
 	ama = Amasijo(
 				# astrometric_args=astrometric_args,
 				# mcluster_args=mcluster_args,
-				kalkayotl_args={
-				"file":kalkayotl_file,
-				"velocity_model":"joint"},
+				kalkayotl_args={"file":kalkayotl_file},
 				photometric_args=photometric_args,
 				reference_system="Galactic",
+				label_radial_velocity="radial_velocity",
 				seed=seed)
 
 	ama.generate_cluster(file_data,n_stars=n_stars,angular_correlations=None)
