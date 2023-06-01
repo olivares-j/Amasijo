@@ -1114,19 +1114,22 @@ class Amasijo(object):
 if __name__ == "__main__":
 
 	seed      = 0
-	n_stars   = int(5e1)
+	n_stars   = 100
+	distance  = 100.0
 	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Gaussian_Galactic_linear/"
-	base_name = "Gaussian_n{0}".format(n_stars)
+	base_name = "Gaussian_n{0}_d{1}_s{2}".format(n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
 	
 	astrometric_args = {
 		"position":{"family":"Gaussian",
-					"location":np.array([0.0,100.0,0.0]),
-					"covariance":np.diag([2.,2.,2.])},
+					"location":np.array([distance,0.0,0.0]),
+					"covariance":np.diag([9.,9.,9.])},
 		"velocity":{"family":"Gaussian",
-					"location":np.array([0.0,0.0,0.0]),
-					"covariance":np.diag([1.,1.,1.])}}
+					"location":np.array([10.0,10.0,10.0]),
+					"covariance":np.diag([1.,1.,1.])},
+					"kappa":np.ones(3),
+					"omega":np.array([[-1,-1,-1],[1,1,1]])}
 
 	photometric_args = {
 	"log_age": 8.0,    
@@ -1143,12 +1146,12 @@ if __name__ == "__main__":
 		"position+velocity":[0.0,100.0,0.0,0.0,0.0,0.0],
 		"truncation_radius":20.0}
 
-	kalkayotl_file = dir_main + "Cluster_statistics.csv"
+	# kalkayotl_file = dir_main + "Cluster_statistics.csv"
 
 	ama = Amasijo(
-				# astrometric_args=astrometric_args,
+				astrometric_args=astrometric_args,
 				# mcluster_args=mcluster_args,
-				kalkayotl_args={"file":kalkayotl_file},
+				# kalkayotl_args={"file":kalkayotl_file},
 				photometric_args=photometric_args,
 				reference_system="Galactic",
 				label_radial_velocity="radial_velocity",
