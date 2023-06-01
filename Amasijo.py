@@ -1127,9 +1127,10 @@ if __name__ == "__main__":
 					"covariance":np.diag([9.,9.,9.])},
 		"velocity":{"family":"Gaussian",
 					"location":np.array([10.0,10.0,10.0]),
-					"covariance":np.diag([1.,1.,1.])},
+					"covariance":np.diag([1.,1.,1.]),
 					"kappa":np.ones(3),
-					"omega":np.array([[-1,-1,-1],[1,1,1]])}
+					"omega":np.array([[-1,-1,-1],[1,1,1]])
+					}}
 
 	photometric_args = {
 	"log_age": 8.0,    
