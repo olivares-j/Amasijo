@@ -399,7 +399,7 @@ class Amasijo(object):
 			elif velocity_args["family"] == "StudentT":
 				UVW = st.multivariate_t.rvs(
 									loc=velocity_args["location"],
-									scale=velocity_args["covariance"],
+									shape=velocity_args["covariance"],
 									df=velocity_args["nu"],
 									size=n_stars)
 
