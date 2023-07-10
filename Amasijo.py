@@ -366,7 +366,7 @@ class Amasijo(object):
 			elif position_args["family"] == "StudentT":
 				XYZ = st.multivariate_t.rvs(
 											loc=position_args["location"],
-											scale=position_args["covariance"],
+											shape=position_args["covariance"],
 											df=position_args["nu"],
 											size=n_stars)
 
@@ -1115,7 +1115,7 @@ if __name__ == "__main__":
 
 	seed      = 0
 	n_stars   = 100
-	distance  = 100.0
+	distance  = 200.0
 	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Gaussian_Galactic_linear/"
 	base_name = "Gaussian_n{0}_d{1}_s{2}".format(n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
