@@ -36,6 +36,7 @@ class Amasijo(object):
 					"file":None},
 					release="dr3",
 					label_radial_velocity="dr3_radial_velocity",
+					radial_velocity_uncertainty_ceil=None,
 					seed=1234):
 
 		#------ Set Seed -----------------------------------
@@ -44,6 +45,7 @@ class Amasijo(object):
 		self.seed = seed
 		self.release = release
 		self.reference_system = reference_system
+		self.rvl_unc_ceil = radial_velocity_uncertainty_ceil
 		#-----------------------------------------------------
 
 		assert reference_system in ["Galactic","ICRS"], "ERROR:reference_system must be Galactic or ICRS"
@@ -578,6 +580,8 @@ class Amasijo(object):
 							teff=true_sp["Teff"],
 							logg=true_sp["logg"],
 							release=self.release)
+		if self.rvl_unc_ceil is not None:
+			rvl_unc = np.where(rvl_unc>self.rvl_unc_ceil,self.rvl_unc_ceil,rvl_unc)
 		g_unc  = np.full(N,fill_value=soil_mag_uncertainty)
 		bp_unc = np.full(N,fill_value=soil_mag_uncertainty)
 		rp_unc = np.full(N,fill_value=soil_mag_uncertainty)
