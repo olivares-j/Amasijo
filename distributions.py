@@ -267,7 +267,7 @@ class multivariate_eff_gen(multi_rv_generic):
 
 	def _logpdf3d(self, x, loc, U, log_pdet, gamma,dim):
 		# U is inverse Cholesky, so only one product U*x instead of sqrt(x*U*U.T*x)
-		quaddist = np.square(np.dot(x - loc,U)).sum(axis=-1)
+		quaddist = np.square(np.dot(U,(x - loc).T)).sum(axis=-1)
 
 		a = 1.5*np.log(np.pi)
 		b = np.log(gamma_function(0.5*(gamma-3.)))
@@ -357,7 +357,7 @@ class multivariate_eff_gen(multi_rv_generic):
 
 		if dim > 1:
 			chol = np.linalg.cholesky(scale)
-			samples = np.dot(samples,chol)
+			samples = np.dot(chol,samples.T).T
 		else:
 			samples = samples*scale
 
@@ -589,7 +589,7 @@ class multivariate_king_gen(multi_rv_generic):
 
 	def _logpdf3d(self, x, loc, U, log_pdet, rt):
 		# U is inverse Cholesky, so only one product U*x instead of sqrt(x*U*U.T*x)
-		quaddist = np.square(np.dot(x - loc,U)).sum(axis=-1)
+		quaddist = np.square(np.dot(U,(x - loc).T)).sum(axis=-1)
 
 		# Remember rc = np.exp(log_pdet)
 		#--- The following assumes rc = 1
@@ -731,7 +731,7 @@ class multivariate_king_gen(multi_rv_generic):
 
 		if dim > 1:
 			chol = np.linalg.cholesky(scale)
-			samples = np.dot(samples,chol)
+			samples = np.dot(chol,samples.T).T
 		else:
 			samples = scale*samples
 

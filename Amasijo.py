@@ -434,7 +434,7 @@ class Amasijo(object):
 
 				offset_pos = XYZ - position_args["location"]
 
-				offset_vel = np.dot(offset_pos,lnv)
+				offset_vel = np.dot(lnv,offset_pos.T).T
 
 				UVW += offset_vel
 			#===============================================================================================
