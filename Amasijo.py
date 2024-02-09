@@ -36,7 +36,6 @@ class Amasijo(object):
 					"file":None},
 					release="dr3",
 					label_radial_velocity="dr3_radial_velocity",
-					radial_velocity_uncertainty_ceil=None,
 					seed=1234):
 
 		#------ Set Seed -----------------------------------
@@ -45,7 +44,6 @@ class Amasijo(object):
 		self.seed = seed
 		self.release = release
 		self.reference_system = reference_system
-		self.rvl_unc_ceil = radial_velocity_uncertainty_ceil
 		#-----------------------------------------------------
 
 		assert reference_system in ["Galactic","ICRS"], "ERROR:reference_system must be Galactic or ICRS"
@@ -65,8 +63,7 @@ class Amasijo(object):
 			self.mcluster_args = mcluster_args
 			case = "McLuster"
 		elif kalkayotl_args is not None:
-			assert os.path.exists(kalkayotl_args["file"]), "Input Kalkayotl file does not exists!"
-			self.astrometric_args = self._read_kalkayotl(kalkayotl_args["file"])
+			self.astrometric_args = self._read_kalkayotl(kalkayotl_args)
 			case = "Kalkayotl"
 		else:
 			sys.exit("You must provide astrometric_args, mcluster_args or a Kalkayotl_args!")
@@ -92,9 +89,16 @@ class Amasijo(object):
 								"pmra_error","pmdec_error","{0}_error".format(label_radial_velocity)]
 		#-----------------------------------------------------------------------------------------------------
 
-	def _read_kalkayotl(self,file,statistic="MAP"):
+	def _read_kalkayotl(self,args):
+		assert os.path.exists(args["file"]), "Input Kalkayotl file does not exists!\n{0}".format(args["file"])
+		statistic = args["statistic"]
+		do_replace = True if "replace" in args else False
+		if do_replace:
+			for key,value in args["replace"].items():
+				assert key in ["position","velocity","position+velocity"], "Error in replacement dictionary!"
+
 		#-------- Read file -------------------------------------
-		param = pd.read_csv(file,usecols=["Parameter",statistic])
+		param = pd.read_csv(args["file"],usecols=["Parameter",statistic])
 		#--------------------------------------------------------
 
 		has_UVW = any(param["Parameter"].str.contains("U")) &\
@@ -308,6 +312,12 @@ class Amasijo(object):
 						"covariance":cov}
 					}
 			#==========================================================================
+		if do_replace:
+			print("The following values were replaced:")
+			for case,dicts in args["replace"].items():
+				for key,value in dicts.items():
+					astrometric_args[case][key] = value
+					print("{0} {1} : {2}".format(case,key,value))
 		return astrometric_args
 
 	#====================== Generate Astrometric Data ==================================================
@@ -540,8 +550,15 @@ class Amasijo(object):
 
 	def _generate_observed_values(self,true,
 				angular_correlations="Lindegren+2020",
-				soil_mag_uncertainty=1.0
+				soil_mag_uncertainty=1.0,
+				g_mag_shift_for_astrometry=0.0,
+				impute_radial_velocity=False,
+				fraction_radial_velocities_observed=None,
 				):
+		frac_rvs_obs = fraction_radial_velocities_observed
+
+		assert frac_rvs_obs is None or isinstance(frac_rvs_obs,float),\
+		"Error: fraction_radial_velocities_observed must be float or None"
 
 		N = len(true)
 
@@ -567,21 +584,24 @@ class Amasijo(object):
 		#--------------------------------------------------------------------------------------
 
 		#================== Uncertainties ================================
-		ra_unc,dec_unc = position_uncertainty(true_ph["G_mag"],
-							release=self.release)
+		#------- Apply photometric shift to compute astrometric uncertainties------
+		shifted_G_mag = true_ph["G_mag"] + g_mag_shift_for_astrometry
+		#---------------------------------------------------------------------------
 
-		plx_unc = parallax_uncertainty(true_ph["G_mag"],
-							release=self.release)
+		ra_unc,dec_unc = position_uncertainty(shifted_G_mag,
+							release=self.release) # In micro-arcseconds
 
-		mua_unc,mud_unc = proper_motion_uncertainty(true_ph["G_mag"], 
-							release=self.release)
+		plx_unc = parallax_uncertainty(shifted_G_mag,
+							release=self.release) # In micro-arcseconds
+
+		mua_unc,mud_unc = proper_motion_uncertainty(shifted_G_mag, 
+							release=self.release) # In micro-arcseconds per year
 
 		rvl_unc = radial_velocity_uncertainty(grvs=true_sp["GRVS_mag"],
 							teff=true_sp["Teff"],
 							logg=true_sp["logg"],
-							release=self.release)
-		if self.rvl_unc_ceil is not None:
-			rvl_unc = np.where(rvl_unc>self.rvl_unc_ceil,self.rvl_unc_ceil,rvl_unc)
+							release=self.release) # km per second
+		
 		g_unc  = np.full(N,fill_value=soil_mag_uncertainty)
 		bp_unc = np.full(N,fill_value=soil_mag_uncertainty)
 		rp_unc = np.full(N,fill_value=soil_mag_uncertainty)
@@ -600,15 +620,15 @@ class Amasijo(object):
 
 		g_unc[idx_g]   = magnitude_uncertainty(band="g",
 								maglist=true_ph["G_mag"][idx_g],
-								release=self.release)
+								release=self.release) # In mmag
 
 		bp_unc[idx_bp]  = magnitude_uncertainty(band="bp",
 							maglist=true_ph["BP_mag"][idx_bp],
-							release=self.release)
+							release=self.release) # In mmag
 
 		rp_unc[idx_rp]  = magnitude_uncertainty(band="rp",
 							maglist=true_ph["RP_mag"][idx_rp], 
-							release=self.release)
+							release=self.release) # In mmag
 		del true_sp
 		#------------------------------------------------------------
 
@@ -633,10 +653,31 @@ class Amasijo(object):
 		#==================================================================
 
 		#================= Astrometry =================================
-		#-------------- Missing rvel ----------------
+		#-------------- Missing rvel ----------------------------------------------------
 		idx_nan_rvl = np.where(np.isnan(rvl_unc))[0]
+		idx_obs_rvl = np.where(np.isfinite(rvl_unc))[0]
+
+		if frac_rvs_obs is not None:
+			target_n_obs_rvl = int(np.ceil(N*frac_rvs_obs))
+			actual_n_obs_rvl = len(idx_obs_rvl)
+			print(target_n_obs_rvl,actual_n_obs_rvl)
+			if actual_n_obs_rvl < target_n_obs_rvl:
+				print("WARNING: The number of non-missing radial velocities "+
+				"is smaller than the target one")
+				print("Actual: {0}. Target: {1}".format(
+					actual_n_obs_rvl,target_n_obs_rvl))
+				print("Try increasing the minimum mass")
+			else:
+				idx_nan_rvl_extra = np.random.choice(idx_obs_rvl,
+									size=actual_n_obs_rvl - target_n_obs_rvl,
+									replace=False)
+
+				idx_nan_rvl = np.union1d(idx_nan_rvl,idx_nan_rvl_extra)
+		print("The fraction of missing radial velocities is {0:2.2f}: target {1:2.2f}".format(
+			float(len(idx_nan_rvl)/N),1.0-frac_rvs_obs))
+
 		unc_as[idx_nan_rvl,5] = 99
-		#--------------------------------------------
+		#---------------------------------------------------------------------------------------
 
 		#------ Fix units --------------------------
 		# Uncertainty must be in same units as value
@@ -702,10 +743,21 @@ class Amasijo(object):
 			#-----------------------------------------------
 		#=====================================================================
 
-		#-- Replace nan rvel by nan -------
-		obs_as[idx_nan_rvl,5] = np.nan
-		unc_as[idx_nan_rvl,5] = np.nan
-		#--------------------------------
+		if impute_radial_velocity:
+			#------ Radial velocity mean and std -------
+			mu_rv = np.nanmedian(obs_as[idx_obs_rvl,5])
+			sd_rv = 2.*np.nanstd(obs_as[idx_obs_rvl,5])
+			#------------------------------------------
+
+			#-- Replace nan rvel by median -------
+			obs_as[idx_nan_rvl,5] = mu_rv
+			unc_as[idx_nan_rvl,5] = sd_rv
+			#--------------------------------
+		else:
+			#-- Replace nan rvel by nan -------
+			obs_as[idx_nan_rvl,5] = np.nan
+			unc_as[idx_nan_rvl,5] = np.nan
+			#--------------------------------
 
 		#------ Fix units --------------------------
 		unc_as[:,0] *= 3.6e6 #degrees back to mas
@@ -771,7 +823,11 @@ class Amasijo(object):
 	#================= Generate cluster ==========================
 	def generate_cluster(self,file,n_stars=100,
 						angular_correlations="Lindegren+2020",
-						index_label="source_id"):
+						index_label="source_id",
+						soil_mag_uncertainty=4.0,
+						impute_radial_velocity=False,
+						g_mag_shift_for_astrometry=0.0,
+						fraction_radial_velocities_observed=None):
 
 		if hasattr(self,"mcluster_args"):
 			#--------------- Generate McLuster file ------------
@@ -855,7 +911,11 @@ class Amasijo(object):
 		#------------- Observed values ----------------------------
 		print("Generating observed values ...")
 		df_obs = self._generate_observed_values(df_true,
-						angular_correlations=angular_correlations)
+		angular_correlations=angular_correlations,
+		soil_mag_uncertainty=soil_mag_uncertainty,
+		impute_radial_velocity=impute_radial_velocity,
+		g_mag_shift_for_astrometry=g_mag_shift_for_astrometry,
+		fraction_radial_velocities_observed=fraction_radial_velocities_observed)
 		#----------------------------------------------------------
 
 		#-------- Join data frames -----------------------------
