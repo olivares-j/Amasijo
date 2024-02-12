@@ -9,6 +9,7 @@ from subprocess import call
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.interpolate import splrep,splev
+from scipy.spatial import distance
 
 from Functions import AngularSeparation,covariance_parallax,covariance_proper_motion
 from distributions import mveff,mvking
@@ -34,14 +35,20 @@ class Amasijo(object):
 					reference_system="Galactic",
 					kalkayotl_args={
 					"file":None},
+					radial_velocity={
+						"label":"dr3_radial_velocity",
+						"family":"Gaia"},
+					additional_columns={"ruwe":1.0},
 					release="dr3",
-					label_radial_velocity="dr3_radial_velocity",
 					seed=1234):
+
+		assert radial_velocity["family"] in ["Gaia","Uniform"],"Error: only Gaia or Uniform in radial_velocity family!"
 
 		#------ Set Seed -----------------------------------
 		np.random.seed(seed=seed)
 		self.random_state = np.random.RandomState(seed=seed)
 		self.seed = seed
+		self.radial_velocity = radial_velocity
 		self.release = release
 		self.reference_system = reference_system
 		#-----------------------------------------------------
@@ -75,7 +82,7 @@ class Amasijo(object):
 		#------- Labels ----------------------------------------------------------------------------------
 		self.labels_phase_space = ["X","Y","Z","U","V","W"]
 		self.labels_true_as = ["ra_true","dec_true","parallax_true",
-								"pmra_true","pmdec_true","{0}_true".format(label_radial_velocity)]
+								"pmra_true","pmdec_true","{0}_true".format(radial_velocity["label"])]
 		self.labels_true_ph = [band+"_mag" for band in photometric_args["bands"]]
 		self.labels_cor_as  = ["ra_dec_corr","ra_parallax_corr","ra_pmra_corr","ra_pmdec_corr",
 							   "dec_parallax_corr","dec_pmra_corr","dec_pmdec_corr",
@@ -83,45 +90,58 @@ class Amasijo(object):
 							   "pmra_pmdec_corr"]
 		self.labels_obs_ph  = ["g","bp","rp"]
 		self.labels_unc_ph  = ["g_error","bp_error","rp_error"]
-		self.labels_rvl     = ["{0}".format(label_radial_velocity),"{0}_error".format(label_radial_velocity)]
-		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","{0}".format(label_radial_velocity)]
+		self.labels_rvl     = ["{0}".format(radial_velocity["label"]),"{0}_error".format(radial_velocity["label"])]
+		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","{0}".format(radial_velocity["label"])]
 		self.labels_unc_as  = ["ra_error","dec_error","parallax_error",
-								"pmra_error","pmdec_error","{0}_error".format(label_radial_velocity)]
+								"pmra_error","pmdec_error","{0}_error".format(radial_velocity["label"])]
+		self.additional_columns = additional_columns
 		#-----------------------------------------------------------------------------------------------------
 
 	def _read_kalkayotl(self,args):
 		assert os.path.exists(args["file"]), "Input Kalkayotl file does not exists!\n{0}".format(args["file"])
 		statistic = args["statistic"]
 		do_replace = True if "replace" in args else False
+		# if do_replace:
+		# 	for key,value in args["replace"].items():
+		# 		assert key in ["position","velocity","position+velocity"], "Error in replacement dictionary!"
+		# 	if do_replace:
+		# 	print("The following values were replaced:")
+		# 	for case,dicts in args["replace"].items():
+		# 		for key,value in dicts.items():
+		# 			astrometric_args[case][key] = value
+		# 			print("{0} {1} : {2}".format(case,key,value))
+
+		#-------- Read file ---------------------------------------------
+		param = pd.read_csv(args["file"],usecols=["Parameter",statistic])
+		param.set_index("Parameter",inplace=True)
 		if do_replace:
 			for key,value in args["replace"].items():
-				assert key in ["position","velocity","position+velocity"], "Error in replacement dictionary!"
+				assert key in param.index,"Error: replacement key {0} not in input kalkayotl file!".format(key)
+				print("Parameter {0}: {1:2.1f} -> {2:2.3f}".format(key,param.loc[key,statistic],value))
+				param.loc[key,statistic] = value
+		#-----------------------------------------------------------------
 
-		#-------- Read file -------------------------------------
-		param = pd.read_csv(args["file"],usecols=["Parameter",statistic])
-		#--------------------------------------------------------
-
-		has_UVW = any(param["Parameter"].str.contains("U")) &\
-				  any(param["Parameter"].str.contains("V")) &\
-				  any(param["Parameter"].str.contains("W"))
+		has_UVW = any(param.index.str.contains("U")) &\
+				  any(param.index.str.contains("V")) &\
+				  any(param.index.str.contains("W"))
 		assert has_UVW, "ERROR: The Kalkayotl file does not contains velocities UVW"
 
-		is_mixture = any(param["Parameter"].str.contains("weights"))
+		is_mixture = any(param.index.str.contains("weights"))
 
-		is_linear = any(param["Parameter"].str.contains("kappa"))
+		is_linear = any(param.index.str.contains("kappa"))
 
 		if is_mixture:
 			#===================== GMM and CGMM =======================================
 
 			#--------- Weights -----------------------------------------------------------
-			wghs = param.loc[param["Parameter"].str.contains("weights"),statistic].values
+			wghs = param.loc[param.index.str.contains("weights"),statistic].values
 			#-----------------------------------------------------------------------------
 
 			n_components = len(wghs)
 			names_components = list(string.ascii_uppercase)[:n_components]
 
 			#------------- Location ----------------------------------
-			loc = param[param["Parameter"].str.contains("loc")]
+			loc = param[param.index.str.contains("loc")]
 
 
 			if loc.shape[0]/n_components == 6:
@@ -129,14 +149,14 @@ class Amasijo(object):
 				family = "GMM"
 				locs = []
 				for c in names_components:
-					selection = loc["Parameter"].str.contains(
+					selection = loc.index.str.contains(
 								"{0}".format(c),regex=False)
 					locs.append(loc.loc[selection,statistic].values)
 				#---------------------------------------------------------
 			else:
 				#-------------- CGMM -------------------------------------------------
 				family = "CGMM"
-				loc = param.loc[param["Parameter"].str.contains("loc"),statistic].values
+				loc = param.loc[param.index.str.contains("loc"),statistic].values
 				locs = [loc for w in wghs]
 				#---------------------------------------------------------------------
 
@@ -148,9 +168,9 @@ class Amasijo(object):
 			covs = []
 			for c in names_components:
 				#---------- Select component parameters --------
-				mask_std = scl["Parameter"].str.contains(
+				mask_std = scl.index.str.contains(
 							"std[{0}".format(c),regex=False)
-				mask_cor = scl["Parameter"].str.contains(
+				mask_cor = scl.index.str.contains(
 							"corr[{0}".format(c),regex=False)
 				#-----------------------------------------------
 
@@ -183,27 +203,27 @@ class Amasijo(object):
 			#========================================================================
 
 		#=================== Student T =================================================
-		elif any(param["Parameter"].str.contains("nu")):
+		elif any(param.index.str.contains("nu")):
 			
 			#---- Extract parameters ------------------------------------------------
-			loc  = param.loc[param["Parameter"].str.contains("loc"),statistic].values
-			std  = param.loc[param["Parameter"].str.contains('std'),statistic].values
-			nu   = param.loc[param["Parameter"].str.contains('nu'),statistic].values
+			loc  = param.loc[param.index.str.contains("loc"),statistic].values
+			std  = param.loc[param.index.str.contains('std'),statistic].values
+			nu   = param.loc[param.index.str.contains('nu'),statistic].values
 			#-------------------------------------------------------------------------
 
 			param.fillna(value=1.0,inplace=True)
 
 			if is_linear:
-				kappa = param.loc[param["Parameter"].str.contains("kappa"),statistic].values
+				kappa = param.loc[param.index.str.contains("kappa"),statistic].values
 
-				if param["Parameter"].str.contains("omega"):
-					omega = param.loc[param["Parameter"].str.contains("omega"),statistic].values
+				if param.index.str.contains("omega"):
+					omega = param.loc[param.index.str.contains("omega"),statistic].values
 				else:
 					omega = np.zeros((2,3))
 
 				#---------------------- Extract -------------------------------------------
-				corr_pos = param.loc[param["Parameter"].str.contains('corr_pos'),statistic].values
-				corr_vel = param.loc[param["Parameter"].str.contains('corr_vel'),statistic].values
+				corr_pos = param.loc[param.index.str.contains('corr_pos'),statistic].values
+				corr_vel = param.loc[param.index.str.contains('corr_vel'),statistic].values
 				#------------------------------------------------------------------------
 
 				#---- Construct covariance ---------
@@ -231,8 +251,8 @@ class Amasijo(object):
 						}
 			else:
 				#---------------------- Extract -------------------------------------------
-				std = param.loc[param["Parameter"].str.contains('std'),statistic].values
-				corr = param.loc[param["Parameter"].str.contains('corr'),statistic].values
+				std = param.loc[param.index.str.contains('std'),statistic].values
+				corr = param.loc[param.index.str.contains('corr'),statistic].values
 				#------------------------------------------------------------------------
 
 				#---- Construct covariance ---------
@@ -253,24 +273,28 @@ class Amasijo(object):
 		else:
 		#=================== Gaussian ====================================================
 			#---- Extract parameters ------------------------------------------------
-			loc  = param.loc[param["Parameter"].str.contains("loc"),statistic].values
-			std  = param.loc[param["Parameter"].str.contains('std'),statistic].values
+			loc  = param.loc[param.index.str.contains("loc"),statistic].values
+			std  = param.loc[param.index.str.contains('std'),statistic].values
 			#------------------------------------------------------------------------
 
 			param.fillna(value=1.0,inplace=True)
 
 			if is_linear:
-				kappa = param.loc[param["Parameter"].str.contains("kappa"),statistic].values
+				kappa = np.array([
+					param.loc[param.index=="6D::kappa[X]",statistic].values,
+					param.loc[param.index=="6D::kappa[Y]",statistic].values,
+					param.loc[param.index=="6D::kappa[Z]",statistic].values
+					]).flatten()
 
-				if any(param["Parameter"].str.contains("omega")):
-					omega = param.loc[param["Parameter"].str.contains("omega"),statistic].values
+				if any(param.index.str.contains("omega")):
+					omega = param.loc[param.index.str.contains("omega"),statistic].values
 					omega = omega.reshape((2,3))
 				else:
 					omega = np.zeros((2,3))
 
 				#---------------------- Extract correlations -------------------------------------
-				corr_pos = param.loc[param["Parameter"].str.contains('corr_pos'),statistic].values
-				corr_vel = param.loc[param["Parameter"].str.contains('corr_vel'),statistic].values
+				corr_pos = param.loc[param.index.str.contains('corr_pos'),statistic].values
+				corr_vel = param.loc[param.index.str.contains('corr_vel'),statistic].values
 				#---------------------------------------------------------------------------------
 
 				#---- Construct covariance ---------
@@ -296,7 +320,7 @@ class Amasijo(object):
 						}
 			else:
 				#---------------------- Extract -------------------------------------------
-				corr = param.loc[param["Parameter"].str.contains('corr'),statistic].values
+				corr = param.loc[param.index.str.contains('corr'),statistic].values
 				#------------------------------------------------------------------------
 
 				#---- Construct covariance ---------
@@ -312,19 +336,19 @@ class Amasijo(object):
 						"covariance":cov}
 					}
 			#==========================================================================
-		if do_replace:
-			print("The following values were replaced:")
-			for case,dicts in args["replace"].items():
-				for key,value in dicts.items():
-					astrometric_args[case][key] = value
-					print("{0} {1} : {2}".format(case,key,value))
+
 		return astrometric_args
 
 	#====================== Generate Astrometric Data ==================================================
-	def _generate_phase_space(self,n_stars):
+	def _generate_phase_space(self,n_stars,max_mahalanobis_distance=np.inf,max_n=2):
 		'''	The phase space coordinates are
 			assumed to represent barycentric (i.e. centred on the Sun) positions and velocities.
 		'''
+		assert max_mahalanobis_distance !=np.inf and \
+			((self.astrometric_args["position"]["family"] == "Gaussian") and
+			(self.astrometric_args["velocity"]["family"] == "Gaussian")),\
+			"Error: max_mahalanobis_distance argument only valid for Gaussian iid positions and velocities"
+
 		#=============== Joined =================================================================
 		if "position+velocity" in self.astrometric_args:
 			join_args = self.astrometric_args["position+velocity"]
@@ -332,7 +356,8 @@ class Amasijo(object):
 				XYZUVW = st.multivariate_normal.rvs(
 							mean=join_args["location"],
 							cov=join_args["covariance"],
-							size=n_stars)
+							size=n_stars,
+							random_state=self.seed)
 
 			elif self.astrometric_args["position+velocity"]["family"] in ["GMM", "CGMM"]:
 				np.testing.assert_almost_equal(np.sum(join_args["weights"]),1.0,
@@ -347,7 +372,7 @@ class Amasijo(object):
 
 				l = []
 				for n,loc,cov in zip(n_stars_cmp,join_args["location"],join_args["covariance"]):
-					l.append(st.multivariate_normal.rvs(mean=loc,cov=cov,size=n))
+					l.append(st.multivariate_normal.rvs(mean=loc,cov=cov,size=n,random_state=self.seed))
 
 				XYZUVW = np.concatenate(l,axis=0)
 
@@ -370,10 +395,32 @@ class Amasijo(object):
 
 			#=============================== Positions ========================================================
 			if position_args["family"] == "Gaussian":
-				XYZ = st.multivariate_normal.rvs(
-												mean=position_args["location"],
-												cov=position_args["covariance"],
-												size=n_stars)
+				max_n_stars = int(max_n*n_stars)
+				mhl_pos = np.zeros(max_n_stars)
+				xyz = st.multivariate_normal.rvs(
+											mean=position_args["location"],
+											cov=position_args["covariance"],
+											size=max_n_stars,
+											random_state=self.seed)
+				if max_mahalanobis_distance == np.inf:
+					idx = np.arange(n_stars)
+				else:
+					loc_pos = position_args["location"]
+					inv_pos = np.linalg.inv(position_args["covariance"])
+					for i in range(max_n_stars):
+						mhl_pos[i] = distance.mahalanobis(xyz[i],loc_pos, inv_pos)
+
+					idx = np.where(mhl_pos <= max_mahalanobis_distance)[0]
+
+					if len(idx) >= n_stars:
+						idx = np.random.choice(idx,size=n_stars,replace=False)
+					else:
+						sys.exit("Error: The number of available stars is smaller than the requested\n"+
+							"Try increasing the 'max_n' factor")
+
+				print("Maximum Mahalanobis distance in position: {0:2.1f}".format(mhl_pos[idx].max()))
+
+				XYZ = xyz[idx]
 
 			elif position_args["family"] == "StudentT":
 				XYZ = st.multivariate_t.rvs(
@@ -404,9 +451,31 @@ class Amasijo(object):
 
 			#=============================== Velocities ========================================
 			if velocity_args["family"] == "Gaussian":
-				UVW = st.multivariate_normal.rvs(mean=velocity_args["location"],
-												cov=velocity_args["covariance"],
-												size=n_stars)
+				mhl_vel = np.zeros(max_n_stars)
+				uvw = st.multivariate_normal.rvs(
+											mean=velocity_args["location"],
+											cov=velocity_args["covariance"],
+											size=max_n_stars,
+											random_state=self.seed)
+				if max_mahalanobis_distance == np.inf:
+					idx = np.arange(n_stars)
+				else:
+					loc_vel = velocity_args["location"]
+					inv_vel = np.linalg.inv(velocity_args["covariance"])
+					for i in range(max_n_stars):
+						mhl_vel[i] = distance.mahalanobis(uvw[i],loc_vel, inv_vel)
+
+					idx = np.where(mhl_vel <= max_mahalanobis_distance)[0]
+
+					if len(idx) >= n_stars:
+						idx = np.random.choice(idx,size=n_stars,replace=False)
+					else:
+						sys.exit("Error: The number of available stars is smaller than the requested\n"+
+							"Try increasing the 'max_n' factor")
+
+				print("Maximum Mahalanobis distance in velocity: {0:2.1f}".format(mhl_vel[idx].max()))
+				
+				UVW = uvw[idx]
 
 			elif velocity_args["family"] == "StudentT":
 				UVW = st.multivariate_t.rvs(
@@ -551,11 +620,14 @@ class Amasijo(object):
 	def _generate_observed_values(self,true,
 				angular_correlations="Lindegren+2020",
 				soil_mag_uncertainty=1.0,
-				g_mag_shift_for_astrometry=0.0,
+				g_mag_shift_for_uncertainty=None,
 				impute_radial_velocity=False,
 				fraction_radial_velocities_observed=None,
 				):
 		frac_rvs_obs = fraction_radial_velocities_observed
+
+		g_mag_shift_for_uncertainty = g_mag_shift_for_uncertainty if \
+		g_mag_shift_for_uncertainty is not None else {"astrometry":0.0,"spectroscopy":0.0}
 
 		assert frac_rvs_obs is None or isinstance(frac_rvs_obs,float),\
 		"Error: fraction_radial_velocities_observed must be float or None"
@@ -565,9 +637,9 @@ class Amasijo(object):
 		rng = np.random.default_rng()
 
 		#---- Astrometric and photometric values ------
-		true_as = true.loc[:,self.labels_true_as]
-		true_ph = true.loc[:,["G_mag","BP_mag","RP_mag"]]
-		true_sp = true.loc[:,["G_mag","BP_mag","RP_mag","Teff","logg"]]
+		true_as = true.loc[:,self.labels_true_as].copy()
+		true_ph = true.loc[:,["G_mag","BP_mag","RP_mag"]].copy()
+		true_sp = true.loc[:,["G_mag","BP_mag","RP_mag","Teff","logg"]].copy()
 		index = true.index
 		del true
 		#------------------------------------------------
@@ -585,22 +657,34 @@ class Amasijo(object):
 
 		#================== Uncertainties ================================
 		#------- Apply photometric shift to compute astrometric uncertainties------
-		shifted_G_mag = true_ph["G_mag"] + g_mag_shift_for_astrometry
+		shifted_G_mag_as = true_ph["G_mag"]    + g_mag_shift_for_uncertainty["astrometry"]
+		shifted_G_mag_sp = true_sp["GRVS_mag"] + g_mag_shift_for_uncertainty["spectroscopy"]
 		#---------------------------------------------------------------------------
+		
 
-		ra_unc,dec_unc = position_uncertainty(shifted_G_mag,
+		ra_unc,dec_unc = position_uncertainty(shifted_G_mag_as,
 							release=self.release) # In micro-arcseconds
 
-		plx_unc = parallax_uncertainty(shifted_G_mag,
+		plx_unc = parallax_uncertainty(shifted_G_mag_as,
 							release=self.release) # In micro-arcseconds
 
-		mua_unc,mud_unc = proper_motion_uncertainty(shifted_G_mag, 
+		mua_unc,mud_unc = proper_motion_uncertainty(shifted_G_mag_as, 
 							release=self.release) # In micro-arcseconds per year
 
-		rvl_unc = radial_velocity_uncertainty(grvs=true_sp["GRVS_mag"],
-							teff=true_sp["Teff"],
-							logg=true_sp["logg"],
-							release=self.release) # km per second
+		if self.radial_velocity["family"] == "Gaia":
+			rvl_unc = radial_velocity_uncertainty(grvs=shifted_G_mag_sp,
+								teff=true_sp["Teff"],
+								logg=true_sp["logg"],
+								release=self.release) # km per second
+		elif self.radial_velocity["family"] == "Uniform":
+			print("rv_uncertainty ~ Uniform(limits) [km.s-1]")
+			rvl_unc = np.random.uniform(
+				low=self.radial_velocity["limits"][0],
+				high=self.radial_velocity["limits"][1],
+				size=len(shifted_G_mag_sp))
+		else:
+			sys.exit("Error: The radial velocity family '{0}' is not implemented".format(
+				self.radial_velocity["family"]))
 		
 		g_unc  = np.full(N,fill_value=soil_mag_uncertainty)
 		bp_unc = np.full(N,fill_value=soil_mag_uncertainty)
@@ -660,7 +744,6 @@ class Amasijo(object):
 		if frac_rvs_obs is not None:
 			target_n_obs_rvl = int(np.ceil(N*frac_rvs_obs))
 			actual_n_obs_rvl = len(idx_obs_rvl)
-			print(target_n_obs_rvl,actual_n_obs_rvl)
 			if actual_n_obs_rvl < target_n_obs_rvl:
 				print("WARNING: The number of non-missing radial velocities "+
 				"is smaller than the target one")
@@ -779,6 +862,7 @@ class Amasijo(object):
 					columns=self.labels_cor_as)
 		df_as = df_as.join(df_cor_as)
 		#----------------------------------------
+
 		del df_obs_as,df_unc_as,df_cor_as,obs_as,unc_as
 		#===========================================================
 
@@ -805,9 +889,16 @@ class Amasijo(object):
 		#------- Join ------------
 		df_obs = df_as.join(df_ph)
 		del df_as,df_ph
+		#-------------------------
+
+		#--------------- Additional columns -------------
+		for key,value in self.additional_columns.items():
+			df_obs[key] = value
+		#------------------------------------------------
 
 		#------- Set index -------
 		df_obs.set_index(index,inplace=True)
+		#--------------------------------------
 
 		return df_obs
 
@@ -826,8 +917,9 @@ class Amasijo(object):
 						index_label="source_id",
 						soil_mag_uncertainty=4.0,
 						impute_radial_velocity=False,
-						g_mag_shift_for_astrometry=0.0,
-						fraction_radial_velocities_observed=None):
+						g_mag_shift_for_uncertainty=None,
+						fraction_radial_velocities_observed=None,
+						max_mahalanobis_distance=np.inf,max_n=2):
 
 		if hasattr(self,"mcluster_args"):
 			#--------------- Generate McLuster file ------------
@@ -874,7 +966,9 @@ class Amasijo(object):
 
 			#---------- Phase space coordinates --------------
 			print("Generating phase-space values ...")
-			X = self._generate_phase_space(n_stars=n_stars)
+			X = self._generate_phase_space(n_stars=n_stars,
+				max_mahalanobis_distance=max_mahalanobis_distance,
+				max_n=max_n)
 			#------------------------------------------------
 
 		#------------ Masses ------------------------------
@@ -914,7 +1008,7 @@ class Amasijo(object):
 		angular_correlations=angular_correlations,
 		soil_mag_uncertainty=soil_mag_uncertainty,
 		impute_radial_velocity=impute_radial_velocity,
-		g_mag_shift_for_astrometry=g_mag_shift_for_astrometry,
+		g_mag_shift_for_uncertainty=g_mag_shift_for_uncertainty,
 		fraction_radial_velocities_observed=fraction_radial_velocities_observed)
 		#----------------------------------------------------------
 
