@@ -28,17 +28,24 @@ from isochrones.priors import ChabrierPrior
 ###############################################################################
 class Amasijo(object):
 	"""This class intends to construct synthetic clusters with simple 
-		astrometric distributions and photometry from stellar models"""
-	def __init__(self,photometric_args,
-					astrometric_args=None,
+		phase-space distributions and photometry from stellar models"""
+	def __init__(self,isochrones_args,
+					phasespace_args=None,
 					mcluster_args=None,
-					reference_system="Galactic",
 					kalkayotl_args={
-					"file":None},
+						"file":None,
+						"statistic":"mean"},
+					photometry={
+						"labels":{
+							"phot_g_mean_mag":"phot_g_mean_mag",
+							"phot_bp_mean_mag":"phot_bp_mean_mag",
+							"phot_rp_mean_mag":"phot_rp_mean_mag"},
+						"family":"Gaia"},
 					radial_velocity={
-						"label":"dr3_radial_velocity",
+						"labels":{"radial_velocity":"radial_velocity"},
 						"family":"Gaia"},
 					additional_columns={"ruwe":1.0},
+					reference_system="Galactic",
 					release="dr3",
 					seed=1234):
 
@@ -54,26 +61,36 @@ class Amasijo(object):
 		#-----------------------------------------------------
 
 		assert reference_system in ["Galactic","ICRS"], "ERROR:reference_system must be Galactic or ICRS"
+		assert set(["G","BP","RP"]).issubset(set(isochrones_args["bands"])),"The three Gaia bands (G,BP,RP, in capital letters) must be present in isochrones bands!"
 
 		#--------------- Tracks ----------------------------
 		self.tracks = get_ichrone('mist', tracks=True,
-						bands=photometric_args["bands"])
+						bands=isochrones_args["bands"])
 		#---------------------------------------------------
 
-		#---------- Arguments ---------------------------------------------------------------
-		self.photometric_args = photometric_args
+		#---------------- Mapper -----------------------------------
+		self.mapper = photometry["labels"]
+		for key,value in radial_velocity["labels"].items():
+			self.mapper[key] = value
 
-		if astrometric_args is not None:
-			self.astrometric_args = astrometric_args
-			case = "astrometric"
+		for key,value in self.mapper.copy().items():
+			self.mapper[key+"_error"] = "{0}_error".format(value)
+		#-----------------------------------------------------------
+
+		#---------- Arguments ---------------------------------------------------------------
+		self.isochrones_args = isochrones_args
+
+		if phasespace_args is not None:
+			self.phasespace_args = phasespace_args
+			case = "phasespace"
 		elif mcluster_args is not None:
 			self.mcluster_args = mcluster_args
 			case = "McLuster"
 		elif kalkayotl_args is not None:
-			self.astrometric_args = self._read_kalkayotl(kalkayotl_args)
+			self.phasespace_args = self._read_kalkayotl(kalkayotl_args)
 			case = "Kalkayotl"
 		else:
-			sys.exit("You must provide astrometric_args, mcluster_args or a Kalkayotl_args!")
+			sys.exit("You must provide phasespace_args, mcluster_args or a Kalkayotl_args!")
 
 		print("Astrometry will be generated from the provided {0} arguments!".format(case))
 		#-----------------------------------------------------------------------------------
@@ -82,18 +99,19 @@ class Amasijo(object):
 		#------- Labels ----------------------------------------------------------------------------------
 		self.labels_phase_space = ["X","Y","Z","U","V","W"]
 		self.labels_true_as = ["ra_true","dec_true","parallax_true",
-								"pmra_true","pmdec_true","{0}_true".format(radial_velocity["label"])]
-		self.labels_true_ph = [band+"_mag" for band in photometric_args["bands"]]
+								"pmra_true","pmdec_true","radial_velocity_true"]
+		self.labels_true_ph = [band+"_mag" for band in isochrones_args["bands"]]
 		self.labels_cor_as  = ["ra_dec_corr","ra_parallax_corr","ra_pmra_corr","ra_pmdec_corr",
 							   "dec_parallax_corr","dec_pmra_corr","dec_pmdec_corr",
 							   "parallax_pmra_corr","parallax_pmdec_corr",
 							   "pmra_pmdec_corr"]
-		self.labels_obs_ph  = ["g","bp","rp"]
-		self.labels_unc_ph  = ["g_error","bp_error","rp_error"]
-		self.labels_rvl     = ["{0}".format(radial_velocity["label"]),"{0}_error".format(radial_velocity["label"])]
-		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","{0}".format(radial_velocity["label"])]
+		self.labels_obs_ph  = ["phot_g_mean_mag","phot_bp_mean_mag","phot_rp_mean_mag"]
+		self.labels_unc_ph  = ["phot_g_mean_mag_error","phot_bp_mean_mag_error","phot_rp_mean_mag_error"]
+		self.labels_obs_rv  = ["radial_velocity"]
+		self.labels_unc_rv  = ["radial_velocity_error"]
+		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","radial_velocity"]
 		self.labels_unc_as  = ["ra_error","dec_error","parallax_error",
-								"pmra_error","pmdec_error","{0}_error".format(radial_velocity["label"])]
+								"pmra_error","pmdec_error","radial_velocity_error"]
 		self.additional_columns = additional_columns
 		#-----------------------------------------------------------------------------------------------------
 
@@ -101,23 +119,17 @@ class Amasijo(object):
 		assert os.path.exists(args["file"]), "Input Kalkayotl file does not exists!\n{0}".format(args["file"])
 		statistic = args["statistic"]
 		do_replace = True if "replace" in args else False
-		# if do_replace:
-		# 	for key,value in args["replace"].items():
-		# 		assert key in ["position","velocity","position+velocity"], "Error in replacement dictionary!"
-		# 	if do_replace:
-		# 	print("The following values were replaced:")
-		# 	for case,dicts in args["replace"].items():
-		# 		for key,value in dicts.items():
-		# 			astrometric_args[case][key] = value
-		# 			print("{0} {1} : {2}".format(case,key,value))
 
 		#-------- Read file ---------------------------------------------
 		param = pd.read_csv(args["file"],usecols=["Parameter",statistic])
 		param.set_index("Parameter",inplace=True)
 		if do_replace:
 			for key,value in args["replace"].items():
-				assert key in param.index,"Error: replacement key {0} not in input kalkayotl file!".format(key)
-				print("Parameter {0}: {1:2.1f} -> {2:2.3f}".format(key,param.loc[key,statistic],value))
+				if key in param.index:
+					old = param.loc[key,statistic]
+				else:
+					old = np.nan
+				print("Parameter {0}: {1:2.1f} -> {2:2.3f}".format(key,old,value))
 				param.loc[key,statistic] = value
 		#-----------------------------------------------------------------
 
@@ -131,6 +143,7 @@ class Amasijo(object):
 		is_linear = any(param.index.str.contains("kappa"))
 
 		if is_mixture:
+			print("A mixture model was identified")
 			#===================== GMM and CGMM =======================================
 
 			#--------- Weights -----------------------------------------------------------
@@ -159,6 +172,8 @@ class Amasijo(object):
 				loc = param.loc[param.index.str.contains("loc"),statistic].values
 				locs = [loc for w in wghs]
 				#---------------------------------------------------------------------
+
+			print("Family type: {0}".format(family))
 
 			#------------- Covariances -----------------------
 			scl = param.fillna(value=1.0)
@@ -193,7 +208,7 @@ class Amasijo(object):
 				#------------------
 			#-------------------------------------------------
 
-			astrometric_args = {
+			phasespace_args = {
 			"position+velocity":{
 					"family":family,
 					"weights":wghs,
@@ -204,6 +219,7 @@ class Amasijo(object):
 
 		#=================== Student T =================================================
 		elif any(param.index.str.contains("nu")):
+			print("A StudentT model was identified")
 			
 			#---- Extract parameters ------------------------------------------------
 			loc  = param.loc[param.index.str.contains("loc"),statistic].values
@@ -214,7 +230,11 @@ class Amasijo(object):
 			param.fillna(value=1.0,inplace=True)
 
 			if is_linear:
-				kappa = param.loc[param.index.str.contains("kappa"),statistic].values
+				kappa = np.array([
+					param.loc[param.index=="6D::kappa[X]",statistic].values,
+					param.loc[param.index=="6D::kappa[Y]",statistic].values,
+					param.loc[param.index=="6D::kappa[Z]",statistic].values
+					]).flatten()
 
 				if param.index.str.contains("omega"):
 					omega = param.loc[param.index.str.contains("omega"),statistic].values
@@ -235,7 +255,7 @@ class Amasijo(object):
 				cov_vel  = np.dot(std_vel,corr_vel.dot(std_vel))
 				#----------------------------------
 
-				astrometric_args = {
+				phasespace_args = {
 				"position":{
 						"family":"StudentT",
 						"nu":nu,
@@ -261,7 +281,7 @@ class Amasijo(object):
 				cov  = np.dot(std,corr.dot(std))
 				#----------------------------------
 
-				astrometric_args = {
+				phasespace_args = {
 				"position+velocity":{
 						"family":"StudentT",
 						"nu":nu,
@@ -272,6 +292,7 @@ class Amasijo(object):
 
 		else:
 		#=================== Gaussian ====================================================
+			print("A Gaussian model was identified")
 			#---- Extract parameters ------------------------------------------------
 			loc  = param.loc[param.index.str.contains("loc"),statistic].values
 			std  = param.loc[param.index.str.contains('std'),statistic].values
@@ -306,7 +327,7 @@ class Amasijo(object):
 				cov_vel  = np.dot(std_vel,corr_vel.dot(std_vel))
 				#----------------------------------
 
-				astrometric_args = {
+				phasespace_args = {
 				"position":{
 						"family":"Gaussian",
 						"location":loc[:3],
@@ -329,29 +350,30 @@ class Amasijo(object):
 				cov  = np.dot(std,corr.dot(std))
 				#----------------------------------
 
-				astrometric_args = {
+				phasespace_args = {
 				"position+velocity":{
 						"family":"Gaussian",
 						"location":loc,
 						"covariance":cov}
 					}
 			#==========================================================================
-
-		return astrometric_args
+		return phasespace_args
 
 	#====================== Generate Astrometric Data ==================================================
 	def _generate_phase_space(self,n_stars,max_mahalanobis_distance=np.inf,max_n=2):
 		'''	The phase space coordinates are
 			assumed to represent barycentric (i.e. centred on the Sun) positions and velocities.
 		'''
-		assert max_mahalanobis_distance !=np.inf and \
-			((self.astrometric_args["position"]["family"] == "Gaussian") and
-			(self.astrometric_args["velocity"]["family"] == "Gaussian")),\
+		if max_mahalanobis_distance != np.inf :
+			assert (( (self.phasespace_args["position"]["family"] == "Gaussian") and
+					  (self.phasespace_args["velocity"]["family"] == "Gaussian")
+					) or 
+					(self.phasespace_args["position+velocity"]["family"] == "Gaussian")),\
 			"Error: max_mahalanobis_distance argument only valid for Gaussian iid positions and velocities"
 
 		#=============== Joined =================================================================
-		if "position+velocity" in self.astrometric_args:
-			join_args = self.astrometric_args["position+velocity"]
+		if "position+velocity" in self.phasespace_args:
+			join_args = self.phasespace_args["position+velocity"]
 			if join_args["family"] == "Gaussian":
 				XYZUVW = st.multivariate_normal.rvs(
 							mean=join_args["location"],
@@ -359,7 +381,7 @@ class Amasijo(object):
 							size=n_stars,
 							random_state=self.seed)
 
-			elif self.astrometric_args["position+velocity"]["family"] in ["GMM", "CGMM"]:
+			elif self.phasespace_args["position+velocity"]["family"] in ["GMM", "CGMM"]:
 				np.testing.assert_almost_equal(np.sum(join_args["weights"]),1.0,
 						err_msg="ERROR: sum of weights must be 1.0. It is ",verbose=True)
 				n_cmp = len(join_args["weights"])
@@ -382,8 +404,8 @@ class Amasijo(object):
 
 		#========================================================================================
 		else:
-			position_args = self.astrometric_args["position"]
-			velocity_args = self.astrometric_args["velocity"]
+			position_args = self.phasespace_args["position"]
+			velocity_args = self.phasespace_args["velocity"]
 
 			#======================= Verification ==============================================================
 			msg_0 = "Error in position arguments: loc and scale must have same dimension."
@@ -396,7 +418,6 @@ class Amasijo(object):
 			#=============================== Positions ========================================================
 			if position_args["family"] == "Gaussian":
 				max_n_stars = int(max_n*n_stars)
-				mhl_pos = np.zeros(max_n_stars)
 				xyz = st.multivariate_normal.rvs(
 											mean=position_args["location"],
 											cov=position_args["covariance"],
@@ -405,6 +426,7 @@ class Amasijo(object):
 				if max_mahalanobis_distance == np.inf:
 					idx = np.arange(n_stars)
 				else:
+					mhl_pos = np.zeros(max_n_stars)
 					loc_pos = position_args["location"]
 					inv_pos = np.linalg.inv(position_args["covariance"])
 					for i in range(max_n_stars):
@@ -418,7 +440,7 @@ class Amasijo(object):
 						sys.exit("Error: The number of available stars is smaller than the requested\n"+
 							"Try increasing the 'max_n' factor")
 
-				print("Maximum Mahalanobis distance in position: {0:2.1f}".format(mhl_pos[idx].max()))
+					print("Maximum Mahalanobis distance in position: {0:2.1f}".format(mhl_pos[idx].max()))
 
 				XYZ = xyz[idx]
 
@@ -451,7 +473,6 @@ class Amasijo(object):
 
 			#=============================== Velocities ========================================
 			if velocity_args["family"] == "Gaussian":
-				mhl_vel = np.zeros(max_n_stars)
 				uvw = st.multivariate_normal.rvs(
 											mean=velocity_args["location"],
 											cov=velocity_args["covariance"],
@@ -460,6 +481,7 @@ class Amasijo(object):
 				if max_mahalanobis_distance == np.inf:
 					idx = np.arange(n_stars)
 				else:
+					mhl_vel = np.zeros(max_n_stars)
 					loc_vel = velocity_args["location"]
 					inv_vel = np.linalg.inv(velocity_args["covariance"])
 					for i in range(max_n_stars):
@@ -473,7 +495,7 @@ class Amasijo(object):
 						sys.exit("Error: The number of available stars is smaller than the requested\n"+
 							"Try increasing the 'max_n' factor")
 
-				print("Maximum Mahalanobis distance in velocity: {0:2.1f}".format(mhl_vel[idx].max()))
+					print("Maximum Mahalanobis distance in velocity: {0:2.1f}".format(mhl_vel[idx].max()))
 				
 				UVW = uvw[idx]
 
@@ -561,10 +583,10 @@ class Amasijo(object):
 
 		#------- MIST photometry -----------------------------------------
 		df_ph_mist = self.tracks.generate(masses[idx_mist], 
-									self.photometric_args["log_age"], 
-									self.photometric_args["metallicity"], 
+									self.isochrones_args["log_age"], 
+									self.isochrones_args["metallicity"], 
 									distance=distances[idx_mist], 
-									AV=self.photometric_args["Av"])
+									AV=self.isochrones_args["Av"])
 		#-----------------------------------------------------------------
 
 		#------- Faint photometry ---------------------------------------
@@ -756,7 +778,7 @@ class Amasijo(object):
 									replace=False)
 
 				idx_nan_rvl = np.union1d(idx_nan_rvl,idx_nan_rvl_extra)
-		print("The fraction of missing radial velocities is {0:2.2f}: target {1:2.2f}".format(
+			print("The fraction of missing radial velocities is {0:2.2f}: target {1:2.2f}".format(
 			float(len(idx_nan_rvl)/N),1.0-frac_rvs_obs))
 
 		unc_as[idx_nan_rvl,5] = 99
@@ -962,7 +984,7 @@ class Amasijo(object):
 			X += np.array(mcluster_args["position+velocity"])
 			#----------------------------------------------------------
 			
-		elif hasattr(self,"astrometric_args"):
+		elif hasattr(self,"phasespace_args"):
 
 			#---------- Phase space coordinates --------------
 			print("Generating phase-space values ...")
@@ -972,14 +994,14 @@ class Amasijo(object):
 			#------------------------------------------------
 
 		#------------ Masses ------------------------------
-		if self.photometric_args["mass_prior"] == "Chabrier":
+		if self.isochrones_args["mass_prior"] == "Chabrier":
 			masses  = ChabrierPrior(
-					bounds=self.photometric_args["mass_limits"]
+					bounds=self.isochrones_args["mass_limits"]
 						).sample(n_stars)
-		elif self.photometric_args["mass_prior"] == "Uniform":
+		elif self.isochrones_args["mass_prior"] == "Uniform":
 			masses = np.random.uniform(
-				low=self.photometric_args["mass_limits"][0],
-				high=self.photometric_args["mass_limits"][1],
+				low=self.isochrones_args["mass_limits"][0],
+				high=self.isochrones_args["mass_limits"][1],
 				size=n_stars)
 		else:
 			sys.exit("Photometric prior not implemented")
@@ -1013,13 +1035,18 @@ class Amasijo(object):
 		#----------------------------------------------------------
 
 		#-------- Join data frames -----------------------------
-		self.df = df_obs.join(df_true).join(df_ps)
+		df = df_obs.join(df_true).join(df_ps)
 
 		#-------- Reset index -----------------------
-		self.df.reset_index(drop=True,inplace=True)
+		df.reset_index(drop=True,inplace=True)
+
+		self.df = df.copy()
+
+		#----------- Rename columns ---------------
+		df.rename(columns=self.mapper,inplace=True)
 
 		#----------- Save data frame ----------------------------
-		self.df.to_csv(path_or_buf=file,index_label=index_label)
+		df.to_csv(path_or_buf=file,index_label=index_label)
 
 
 	#=========================Plot =====================================================
@@ -1184,11 +1211,11 @@ class Amasijo(object):
 
 		#------------ Radial velocity ----------------------------
 		plt.figure(figsize=figsize)
-		plt.hist(self.df[self.labels_rvl[0]],density=False,
+		plt.hist(self.df["radial_velocity"],density=False,
 					bins=n_bins,histtype="step",
 					color=cases["observed"]["color"],
 					label=cases["observed"]["label"])
-		plt.hist(self.df[self.labels_rvl[0]+"_true"],density=False,
+		plt.hist(self.df["radial_velocity_true"],density=False,
 					bins=n_bins,histtype="step",
 					color=cases["true"]["color"],
 					label=cases["true"]["label"])
@@ -1209,8 +1236,8 @@ class Amasijo(object):
 
 		#----------- CMDs -----------------------------------
 		plt.figure(figsize=figsize)
-		plt.scatter(self.df["bp"]-self.df["rp"],
-					self.df["g"],
+		plt.scatter(self.df["phot_bp_mean_mag"]-self.df["phot_rp_mean_mag"],
+					self.df["phot_g_mean_mag"],
 					s=cases["observed"]["ms"],
 					color=cases["observed"]["color"],
 					label=cases["observed"]["label"])
@@ -1227,8 +1254,8 @@ class Amasijo(object):
 		plt.close()
 
 		plt.figure(figsize=figsize)
-		plt.scatter(self.df["g"]-self.df["rp"],
-					self.df["g"],
+		plt.scatter(self.df["phot_g_mean_mag"]-self.df["phot_rp_mean_mag"],
+					self.df["phot_g_mean_mag"],
 					s=cases["observed"]["ms"],
 					color=cases["observed"]["color"],
 					label=cases["observed"]["label"])
@@ -1274,12 +1301,12 @@ if __name__ == "__main__":
 	seed      = 0
 	n_stars   = 100
 	distance  = 200.0
-	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Gaussian_Galactic_linear/"
+	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Gaussian_linear/"
 	base_name = "Gaussian_n{0}_d{1}_s{2}".format(n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
 	
-	astrometric_args = {
+	phasespace_args = {
 		"position":{"family":"Gaussian",
 					"location":np.array([distance,0.0,0.0]),
 					"covariance":np.diag([9.,9.,9.])},
@@ -1290,7 +1317,7 @@ if __name__ == "__main__":
 					"omega":np.array([[-1,-1,-1],[1,1,1]])
 					}}
 
-	photometric_args = {
+	isochrones_args = {
 	"log_age": 8.0,    
 	"metallicity":0.012,
 	"Av": 0.0,         
@@ -1308,16 +1335,12 @@ if __name__ == "__main__":
 	# kalkayotl_file = dir_main + "Cluster_statistics.csv"
 
 	ama = Amasijo(
-				astrometric_args=astrometric_args,
+				phasespace_args=phasespace_args,
 				# mcluster_args=mcluster_args,
 				# kalkayotl_args={"file":kalkayotl_file},
-				photometric_args=photometric_args,
-				reference_system="Galactic",
-				label_radial_velocity="radial_velocity",
+				isochrones_args=isochrones_args,
 				seed=seed)
-
 	ama.generate_cluster(file_data,n_stars=n_stars,angular_correlations=None)
-
 	ama.plot_cluster(file_plot=file_plot)
 
 
