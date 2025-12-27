@@ -616,7 +616,7 @@ class Amasijo(object):
 					return_df=True)
 			#-----------------------------------------------------------------
 		elif self.isochrones_args["model"] == "PARSEC":
-			from PARSEC import MLP
+			from .PARSEC import MLP
 			mlp = MLP(
 				file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp"])
 
