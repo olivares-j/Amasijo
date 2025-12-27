@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Amasijo"
-version = "0.1.0"
+version = "0.2.0"
 description = "This python code generates synthetic observables (astrometry+photometry) of open clusters"
 readme = "README.md"
 license = {text = "GNU GPL 3"}

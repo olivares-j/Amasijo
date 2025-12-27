@@ -11,7 +11,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.interpolate import splrep,splev
 from scipy.spatial import distance
 
-from .functions import AngularSeparation,covariance_parallax,covariance_proper_motion
+from functions import AngularSeparation,covariance_parallax,covariance_proper_motion
 
 from pygaia.errors.astrometric import parallax_uncertainty,position_uncertainty,proper_motion_uncertainty
 from pygaia.errors.photometric import magnitude_uncertainty
@@ -20,9 +20,6 @@ from pygaia.errors.spectroscopic import radial_velocity_uncertainty
 from pygaia.astrometry.vectorastrometry import astrometry_to_phase_space,phase_space_to_astrometry
 from pygaia.astrometry.coordinates import CoordinateTransformation
 from pygaia.astrometry.coordinates import Transformations 
-
-from isochrones import get_ichrone
-from isochrones.priors import ChabrierPrior
 
 ###############################################################################
 class Amasijo(object):
@@ -59,13 +56,22 @@ class Amasijo(object):
 		self.reference_system = reference_system
 		#-----------------------------------------------------
 
-		assert reference_system in ["Galactic","ICRS"], "ERROR:reference_system must be Galactic or ICRS"
-		assert set(["G","BP","RP"]).issubset(set(isochrones_args["bands"])),"The three Gaia bands (G,BP,RP, in capital letters) must be present in isochrones bands!"
+		#------------------- Validate input arguments -------------------------------------------------
+		assert reference_system in ["Galactic","ICRS"],\
+		"ERROR:reference_system must be Galactic or ICRS"
+		assert set(["G","BP","RP"]).issubset(set(isochrones_args["bands"])),\
+		"The three Gaia bands (G,BP,RP, in capital letters) must be present in isochrones_args['bands']!"
 
-		#--------------- Tracks ----------------------------
-		self.tracks = get_ichrone('mist', tracks=True,
-						bands=isochrones_args["bands"])
-		#---------------------------------------------------
+		if isochrones_args["model"] == "MIST":
+			assert np.all(isochrones_args["mass_limits"][0]>= 0.1),\
+			"Error: The lower mass allowed by the MIST model is 0.1. Adjust mass_limits!"
+		elif isochrones_args["model"] == "PARSEC":
+			assert np.all(isochrones_args["mass_limits"][0]>= 0.1),\
+			"Error: The lower mass allowed by the PARSEC model is 0.01. Adjust mass_limits!"
+		else:
+			sys.exit("ERROR: Amasijo currently supports only MIST or PARSEC models!")
+		#---------------------------------------------------------------------------------------------
+
 
 		#---------------- Mapper -----------------------------------
 		self.mapper = photometry["labels"]
@@ -99,7 +105,7 @@ class Amasijo(object):
 		self.labels_phase_space = ["X","Y","Z","U","V","W"]
 		self.labels_true_as = ["ra_true","dec_true","parallax_true",
 								"pmra_true","pmdec_true","radial_velocity_true"]
-		self.labels_true_ph = [band+"_mag" for band in isochrones_args["bands"]]
+		self.labels_true_bands = [band+"_mag" for band in isochrones_args["bands"]]
 		self.labels_cor_as  = ["ra_dec_corr","ra_parallax_corr","ra_pmra_corr","ra_pmdec_corr",
 							   "dec_parallax_corr","dec_pmra_corr","dec_pmdec_corr",
 							   "parallax_pmra_corr","parallax_pmdec_corr",
@@ -111,6 +117,8 @@ class Amasijo(object):
 		self.labels_obs_as  = ["ra","dec","parallax","pmra","pmdec","radial_velocity"]
 		self.labels_unc_as  = ["ra_error","dec_error","parallax_error",
 								"pmra_error","pmdec_error","radial_velocity_error"]
+		self.labels_obs_bands = [band for band in isochrones_args["bands"]]
+		self.labels_unc_bands = ["e_"+band for band in isochrones_args["bands"]]
 		self.additional_columns = additional_columns
 		#-----------------------------------------------------------------------------------------------------
 
@@ -579,65 +587,99 @@ class Amasijo(object):
 
 		return df_as,r
 
-	def _generate_true_photometry(self,masses,distances,mist_lower_mass=0.1):
-		#-------- Split --------------------------------
-		idx_mist  = np.where(masses >= mist_lower_mass)[0]
-		idx_faint = np.where(masses <  mist_lower_mass)[0]
-		n_faint   = len(idx_faint)
-		#-----------------------------------------------
+	def _generate_true_photometry(self,distances):
+		n_stars = len(distances)
 
-		#------- MIST photometry -----------------------------------------
-		df_ph_mist = self.tracks.generate(masses[idx_mist], 
-									self.isochrones_args["log_age"], 
-									self.isochrones_args["metallicity"], 
-									distance=distances[idx_mist], 
-									AV=self.isochrones_args["Av"])
-		#-----------------------------------------------------------------
+		if self.isochrones_args["model"] == "MIST":
 
-		#------- Faint photometry ---------------------------------------
-		if n_faint > 0:
-			print("WARNING: objects with mass lower than MIST mass " +\
-							"limit will have wrong photometry!!!!!")
+			from isochrones import get_ichrone
 
-			#--------- Minimal mass -----------------------
-			idx_limit = np.argmin(df_ph_mist["mass"])
-			df_limit  = df_ph_mist.iloc[[idx_limit]].copy()
-			#---------------------------------------------
+			#--------------- Tracks ----------------------------
+			tracks = get_ichrone('mist', tracks=True,
+							bands=isochrones_args["bands"])
+			#---------------------------------------------------
 
-			#----- Maximum mist G band ---------
-			mist_lower_mag = df_limit["G_mag"]
-			#-----------------------------------
+			#------------ Masses ------------------------------
+			masses = np.random.uniform(
+					low=self.isochrones_args["mass_limits"][0],
+					high=self.isochrones_args["mass_limits"][1],
+					size=n_stars)
+			#--------------------------------------------------
 
-			#--------------Repeat n_faint times -----------------------
-			df_ph_faint = pd.concat([df_limit for n in range(n_faint)],
-									ignore_index=True)
-			#---------------------------------------------------------
+			#------- Photometry -----------------------------------------
+			df_ph = tracks.generate(
+					mass=masses, 
+					age=np.log10(self.isochrones_args["age"]*1.e6), 
+					feh=self.isochrones_args["MIST_args"]["metallicity"], 
+					distance=distances, 
+					AV=self.isochrones_args["MIST_args"]["Av"],
+					return_df=True)
+			#-----------------------------------------------------------------
+		elif self.isochrones_args["model"] == "PARSEC":
+			from PARSEC import MLP
+			mlp = MLP(
+				file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp"])
 
-			#--------- Replace G values --------------------
-			df_ph_faint.loc[:,"G_mag"] = np.random.uniform(
-								low=mist_lower_mag,
-								high=21.0,
-								size=n_faint)
-			#-----------------------------------------------
+			assert (self.isochrones_args["age"] >= float(mlp.age_domain[0])) &\
+				(self.isochrones_args["age"] <= float(mlp.age_domain[1])),"ERROR:"+\
+				"Input age outside the PARSEC mlp domain"
 
-			#--------- Append -------------------------------------------
-			df_ph = pd.concat([df_ph_mist,df_ph_faint],ignore_index=True)
-			#------------------------------------------------------------
+			#---------- Selected bands --------------------------------------------------------------
+			parsec_bands = np.array([band.replace("G_","").replace("mag","") for band in mlp.bands])
+			requested_bands = np.array(self.isochrones_args["bands"])
+
+			cnd = sum(np.isin(requested_bands,parsec_bands)) == requested_bands.shape[0]
+			msg = "Error: requested bands not present in PARSEC bands:\n"+\
+			"{0}".format(parsec_bands)
+			assert cnd,msg
+			idx_bands = np.where(np.isin(requested_bands,parsec_bands))[0]
+			#-------------------------------------------------------------------------------------------
+
+			#------------ Theta ------------------------------
+			theta = np.random.uniform(
+				low=mlp.theta_domain[0],
+				high=mlp.theta_domain[1],
+				size=n_stars)
+			#--------------------------------------------------
+
+			#------ Mass and absolute photometry ----------
+			mass,absolute_photometry = mlp(
+				age=self.isochrones_args["age"],
+				theta=theta,
+				n_stars=n_stars)
+			#----------------------------------------------
+
+			#---------- Apparent photometry -----------
+			apparent_photometry = absolute_photometry.eval() \
+					+ 5.0*np.log10(distances)[:,np.newaxis] - 5.0
+			#-----------------------------------------
+
+			#--------- Selected bands -----------------------------
+			photometry = apparent_photometry[:,idx_bands]
+			#------------------------------------------------------
+
+			#------------- Data frame ----------------------
+			df_ph = pd.DataFrame(
+				data=photometry,
+				columns=[band+"_mag" for band in requested_bands])
+			df_ph["mass"] = mass.eval()
+			df_ph["Teff"] = 5500.
+			df_ph["logg"] = 2.7
+			#----------------------------------------------
 
 		else:
-			df_ph = df_ph_mist
+			sys.exit("ERROR: model currently not supported")
 
-		#------- Assert valid magnitude and masses ------------------------------------------------
-		bad =  (df_ph["G_mag"] > 21.0) | (df_ph["G_mag"] < 4.0) | np.isnan(df_ph["G_mag"])  #| \
-			   # (df_ph["BP_mag"] >21.0) | (df_ph["BP_mag"] <4.0) | np.isnan(df_ph["BP_mag"]) | \
-			   # (df_ph["RP_mag"] >21.0) | (df_ph["RP_mag"] <4.0) | np.isnan(df_ph["RP_mag"]) 
+
+
+		assert np.all(np.isfinite(df_ph["G_mag"])),"ERROR: There are missing values in the photometry!"
+
+		#------- Assert valid magnitudes------------------------------------------------
+		bad =  (df_ph["G_mag"] > 21.0) | (df_ph["G_mag"] < 4.0)
 		#---------------------------------------------------------------------------------------
 
 		if sum(bad) > 0:
-			msg_error = "WARNING: Stars are being generated outside the PyGaia limits [4,21]\n" +\
-			"or above MIST photometric limits!"
-			print(msg_error)
-			print("Bad photometric sources:")
+			print("WARNING: The following sources were generated outside the PyGaia limits [4,21]:\n")
 			print(df_ph.loc[bad,["G_mag","mass"]])
 		#--------------------------------------------------------------------
 
@@ -667,6 +709,7 @@ class Amasijo(object):
 		true_as = true.loc[:,self.labels_true_as].copy()
 		true_ph = true.loc[:,["G_mag","BP_mag","RP_mag"]].copy()
 		true_sp = true.loc[:,["G_mag","BP_mag","RP_mag","Teff","logg"]].copy()
+		true_bands = true.loc[:,self.labels_true_bands].copy()
 		index = true.index
 		del true
 		#------------------------------------------------
@@ -894,11 +937,23 @@ class Amasijo(object):
 		#===========================================================
 
 		#======= Photometry ===================================
-		#----- Loop over stars -------------------------
+		#----- Gaia -------------------------
 		obs_ph = np.empty((N,3))
 		for i,mu in true_ph.iterrows():
 			obs_ph[i] = rng.multivariate_normal(
 					mean=mu,cov=np.diag(unc_ph[i]**2),
+					tol=1e-8,method="cholesky",size=1)
+		#-----------------------------------------------
+
+		#--------- Additional (including Gaia) ------------------
+		obs_bands = np.empty_like(true_bands)
+		unc_bands = np.repeat(rp_unc.reshape((-1,1)),
+						obs_bands.shape[1],
+						axis=1)
+		print("WARNING: All isochrone bands will have the same uncertainty as the Gaia_RP band")
+		for i,mu in true_bands.iterrows():
+			obs_bands[i] = rng.multivariate_normal(
+					mean=mu,cov=np.diag(unc_bands[i]**2),
 					tol=1e-8,method="cholesky",size=1)
 		#-----------------------------------------------
 
@@ -908,9 +963,17 @@ class Amasijo(object):
 		df_unc_ph = pd.DataFrame(data=unc_ph,
 					columns=self.labels_unc_ph)
 
-		df_ph = df_obs_ph.join(df_unc_ph)
+		df_obs_bands = pd.DataFrame(data=obs_bands,
+					columns=self.labels_obs_bands)
+		df_unc_bands = pd.DataFrame(data=unc_bands,
+					columns=self.labels_unc_bands)
+		df_ph = pd.concat(
+			[df_obs_ph,df_unc_ph,df_obs_bands,df_unc_bands],
+			ignore_index=False,axis=1)
 		#-----------------------------------------
+
 		del df_obs_ph,df_unc_ph,obs_ph,unc_ph
+		del df_obs_bands,df_unc_bands,obs_bands,unc_bands
 		#===========================================
 
 		#------- Join ------------
@@ -923,7 +986,7 @@ class Amasijo(object):
 			df_obs[key] = value
 		#------------------------------------------------
 
-		#------- Set index -------
+		#------- Set index ------------------
 		df_obs.set_index(index,inplace=True)
 		#--------------------------------------
 
@@ -998,20 +1061,6 @@ class Amasijo(object):
 				max_n=max_n)
 			#------------------------------------------------
 
-		#------------ Masses ------------------------------
-		if self.isochrones_args["mass_prior"] == "Chabrier":
-			masses  = ChabrierPrior(
-					bounds=self.isochrones_args["mass_limits"]
-						).sample(n_stars)
-		elif self.isochrones_args["mass_prior"] == "Uniform":
-			masses = np.random.uniform(
-				low=self.isochrones_args["mass_limits"][0],
-				high=self.isochrones_args["mass_limits"][1],
-				size=n_stars)
-		else:
-			sys.exit("Photometric prior not implemented")
-		#--------------------------------------------------
-
 		#---------- Phase-space ------------------------------------
 		df_ps = pd.DataFrame(data=X,columns=self.labels_phase_space)
 
@@ -1022,7 +1071,7 @@ class Amasijo(object):
 
 		#--------- True photometry -------------------------------
 		print("Generating true photometry ...")
-		df_ph = self._generate_true_photometry(masses,distances)
+		df_ph = self._generate_true_photometry(distances)
 		#---------------------------------------------------------
 
 		#---- Join true values ----------------
@@ -1306,8 +1355,9 @@ if __name__ == "__main__":
 	seed      = 0
 	n_stars   = 100
 	distance  = 200.0
-	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Gaussian_linear/"
-	base_name = "Gaussian_n{0}_d{1}_s{2}".format(n_stars,int(distance),seed)
+	model     = "PARSEC"
+	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Test/"
+	base_name = "{0}_n{1}_d{2}_s{3}".format(model,n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
 	
@@ -1323,12 +1373,13 @@ if __name__ == "__main__":
 					}}
 
 	isochrones_args = {
-	"log_age": 8.0,    
-	"metallicity":0.012,
-	"Av": 0.0,         
-	"mass_limits":[0.001,2.5], 
-	"bands":["G","BP","RP"],
-	"mass_prior":"Uniform"
+	"model":model,
+	"age": 120.0,# [Myr]
+	"MIST_args":{"metallicity":0.012,"Av": 0.0},
+	"PARSEC_args":{
+		"file_mlp":"/home/jolivares/Repos/Huehueti/mlps/PARSEC_10x100/mlp.pkl"},    
+	"mass_limits":[0.1,2.5],
+	"bands":["G","BP","RP"]
 	}
 
 	mcluster_args = {
