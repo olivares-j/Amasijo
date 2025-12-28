@@ -61,15 +61,6 @@ class Amasijo(object):
 		"ERROR:reference_system must be Galactic or ICRS"
 		assert set(["G","BP","RP"]).issubset(set(isochrones_args["bands"])),\
 		"The three Gaia bands (G,BP,RP, in capital letters) must be present in isochrones_args['bands']!"
-
-		if isochrones_args["model"] == "MIST":
-			assert np.all(isochrones_args["mass_limits"][0]>= 0.1),\
-			"Error: The lower mass allowed by the MIST model is 0.1. Adjust mass_limits!"
-		elif isochrones_args["model"] == "PARSEC":
-			assert np.all(isochrones_args["mass_limits"][0]>= 0.1),\
-			"Error: The lower mass allowed by the PARSEC model is 0.01. Adjust mass_limits!"
-		else:
-			sys.exit("ERROR: Amasijo currently supports only MIST or PARSEC models!")
 		#---------------------------------------------------------------------------------------------
 
 
@@ -591,6 +582,8 @@ class Amasijo(object):
 		n_stars = len(distances)
 
 		if self.isochrones_args["model"] == "MIST":
+			assert np.all(self.isochrones_args["MIST_args"]["mass_limits"][0]>= 0.1),\
+			"Error: The lower mass allowed by the MIST model is 0.1. Adjust mass_limits!"
 
 			from isochrones import get_ichrone
 
@@ -616,9 +609,15 @@ class Amasijo(object):
 					return_df=True)
 			#-----------------------------------------------------------------
 		elif self.isochrones_args["model"] == "PARSEC":
+			
 			from .PARSEC import MLP
+			
 			mlp = MLP(
 				file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp"])
+
+			assert (self.isochrones_args["PARSEC_args"]["theta_limits"][0] >= mlp.theta_domain[0]) &\
+				(self.isochrones_args["PARSEC_args"]["theta_limits"][1] <= mlp.theta_domain[1]),"ERROR:"+\
+				"theta_limits outside the PARSEC mlp domain"
 
 			assert (self.isochrones_args["age"] >= float(mlp.age_domain[0])) &\
 				(self.isochrones_args["age"] <= float(mlp.age_domain[1])),"ERROR:"+\
@@ -637,8 +636,8 @@ class Amasijo(object):
 
 			#------------ Theta ------------------------------
 			theta = np.random.uniform(
-				low=mlp.theta_domain[0],
-				high=mlp.theta_domain[1],
+				low=self.isochrones_args["PARSEC_args"]["theta_limits"][0],
+				high=self.isochrones_args["PARSEC_args"]["theta_limits"][1],
 				size=n_stars)
 			#--------------------------------------------------
 
@@ -659,12 +658,17 @@ class Amasijo(object):
 			#------------------------------------------------------
 
 			#------------- Data frame ----------------------
-			df_ph = pd.DataFrame(
+			df_abs = pd.DataFrame(
+				data=absolute_photometry.eval(),
+				columns=["abs_"+band for band in mlp.bands])
+			df_abs["theta"] = theta
+			df_abs["mass"] = mass.eval()
+			df_abs["Teff"] = 5500.
+			df_abs["logg"] = 2.7
+			df_apa = pd.DataFrame(
 				data=photometry,
 				columns=[band+"_mag" for band in requested_bands])
-			df_ph["mass"] = mass.eval()
-			df_ph["Teff"] = 5500.
-			df_ph["logg"] = 2.7
+			df_ph = df_apa.join(df_abs)
 			#----------------------------------------------
 
 		else:
@@ -1375,10 +1379,15 @@ if __name__ == "__main__":
 	isochrones_args = {
 	"model":model,
 	"age": 120.0,# [Myr]
-	"MIST_args":{"metallicity":0.012,"Av": 0.0},
+	"MIST_args":{
+		"mass_limits":[0.1,2.5],
+		"metallicity":0.012,
+		"Av": 0.0
+		},
 	"PARSEC_args":{
-		"file_mlp":"/home/jolivares/Repos/Huehueti/mlps/PARSEC_10x100/mlp.pkl"},    
-	"mass_limits":[0.1,2.5],
+		"file_mlp":"/home/jolivares/Repos/Huehueti/mlps/PARSEC_10x100/mlp.pkl",
+		"theta_limits":[1e-5,0.9]
+		},
 	"bands":["G","BP","RP"]
 	}
 
