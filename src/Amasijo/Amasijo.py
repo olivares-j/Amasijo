@@ -610,21 +610,29 @@ class Amasijo(object):
 			#-----------------------------------------------------------------
 		elif self.isochrones_args["model"] == "PARSEC":
 			
-			from .PARSEC import MLP
+			from .PARSEC import MLP_phot,MLP_mass
 			
-			mlp = MLP(
-				file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp"])
+			mlp_phot = MLP_phot(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_phot"])
+			mlp_mass = MLP_mass(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_mass"])
 
-			assert (self.isochrones_args["PARSEC_args"]["theta_limits"][0] >= mlp.theta_domain[0]) &\
-				(self.isochrones_args["PARSEC_args"]["theta_limits"][1] <= mlp.theta_domain[1]),"ERROR:"+\
-				"theta_limits outside the PARSEC mlp domain"
+			assert (self.isochrones_args["PARSEC_args"]["theta_limits"][0] >= mlp_phot.theta_domain[0]) &\
+				(self.isochrones_args["PARSEC_args"]["theta_limits"][1] <= mlp_phot.theta_domain[1]),"ERROR:"+\
+				"theta_limits outside the PARSEC mlp_phot domain"
 
-			assert (self.isochrones_args["age"] >= float(mlp.age_domain[0])) &\
-				(self.isochrones_args["age"] <= float(mlp.age_domain[1])),"ERROR:"+\
-				"Input age outside the PARSEC mlp domain"
+			assert (self.isochrones_args["PARSEC_args"]["theta_limits"][0] >= mlp_mass.theta_domain[0]) &\
+				(self.isochrones_args["PARSEC_args"]["theta_limits"][1] <= mlp_mass.theta_domain[1]),"ERROR:"+\
+				"theta_limits outside the PARSEC mlp_mass domain"
+
+			assert (self.isochrones_args["age"] >= float(mlp_phot.age_domain[0])) &\
+				(self.isochrones_args["age"] <= float(mlp_phot.age_domain[1])),"ERROR:"+\
+				"Input age outside the PARSEC mlp_phot domain"
+
+			assert (self.isochrones_args["age"] >= float(mlp_mass.age_domain[0])) &\
+				(self.isochrones_args["age"] <= float(mlp_mass.age_domain[1])),"ERROR:"+\
+				"Input age outside the PARSEC mlp_mass domain"
 
 			#---------- Selected bands --------------------------------------------------------------
-			parsec_bands = np.array([band.replace("G_","").replace("mag","") for band in mlp.bands])
+			parsec_bands = np.array([band.replace("G_","").replace("mag","") for band in mlp_phot.targets])
 			requested_bands = np.array(self.isochrones_args["bands"])
 
 			cnd = sum(np.isin(requested_bands,parsec_bands)) == requested_bands.shape[0]
@@ -642,7 +650,11 @@ class Amasijo(object):
 			#--------------------------------------------------
 
 			#------ Mass and absolute photometry ----------
-			mass,absolute_photometry = mlp(
+			absolute_photometry = mlp_phot(
+				age=self.isochrones_args["age"],
+				theta=theta,
+				n_stars=n_stars)
+			mass_logTe_logg = mlp_mass(
 				age=self.isochrones_args["age"],
 				theta=theta,
 				n_stars=n_stars)
@@ -660,11 +672,14 @@ class Amasijo(object):
 			#------------- Data frame ----------------------
 			df_abs = pd.DataFrame(
 				data=absolute_photometry.eval(),
-				columns=["abs_"+band for band in mlp.bands])
+				columns=["abs_"+band for band in mlp_phot.targets])
+			df_mTg = pd.DataFrame(
+				data=mass_logTe_logg.eval(),
+				columns=mlp_mass.targets)
+			df_mTg["Teff"] = np.power(10,df_mTg["logTe"])
+			df_mTg.rename(columns={"Mini":"mass"},inplace=True)
 			df_abs["theta"] = theta
-			df_abs["mass"] = mass.eval()
-			df_abs["Teff"] = 5500.
-			df_abs["logg"] = 2.7
+			df_abs = df_abs.join(df_mTg)
 			df_apa = pd.DataFrame(
 				data=photometry,
 				columns=[band+"_mag" for band in requested_bands])
@@ -1361,6 +1376,7 @@ if __name__ == "__main__":
 	distance  = 200.0
 	model     = "PARSEC"
 	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Test/"
+	dir_mlps  = "/home/jolivares/Repos/Huehueti/mlps/PARSEC/"
 	base_name = "{0}_n{1}_d{2}_s{3}".format(model,n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
@@ -1385,7 +1401,8 @@ if __name__ == "__main__":
 		"Av": 0.0
 		},
 	"PARSEC_args":{
-		"file_mlp":"/home/jolivares/Repos/Huehueti/mlps/PARSEC_10x100/mlp.pkl",
+		"file_mlp_phot":dir_mlps+"GP2_l9_s512/mlp.pkl",
+		"file_mlp_mass":dir_mlps+"mTg_l7_s256/mlp.pkl",
 		"theta_limits":[1e-5,0.9]
 		},
 	"bands":["G","BP","RP"]
