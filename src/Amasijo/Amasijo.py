@@ -589,13 +589,13 @@ class Amasijo(object):
 
 			#--------------- Tracks ----------------------------
 			tracks = get_ichrone('mist', tracks=True,
-							bands=isochrones_args["bands"])
+							bands=self.isochrones_args["bands"])
 			#---------------------------------------------------
 
 			#------------ Masses ------------------------------
 			masses = np.random.uniform(
-					low=self.isochrones_args["mass_limits"][0],
-					high=self.isochrones_args["mass_limits"][1],
+					low=self.isochrones_args["MIST_args"]["mass_limits"][0],
+					high=self.isochrones_args["MIST_args"]["mass_limits"][1],
 					size=n_stars)
 			#--------------------------------------------------
 
