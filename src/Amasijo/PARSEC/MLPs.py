@@ -250,7 +250,7 @@ class MLP_logg:
 				self.mass_domain = mlp["mass_domain"]
 				self.teff_domain = mlp["teff_domain"]
 
-			assert num_layers == 7, "Error: mismatch in number of layers!"
+			assert num_layers == 9, "Error: mismatch in number of layers!"
 
 		except FileNotFoundError as error:
 			# Provide a clear error for the user if file missing
@@ -313,8 +313,8 @@ class MLP_logg:
 		A5  = relu(pt.dot(A4, self.W[4])  + self.b[4])
 		A6  = relu(pt.dot(A5, self.W[5])  + self.b[5])
 		A7  = relu(pt.dot(A6, self.W[6])  + self.b[6])
-		# A8  = relu(pt.dot(A7, self.W[7])  + self.b[7])
-		# A9  = relu(pt.dot(A8, self.W[8])  + self.b[8])
+		A8  = relu(pt.dot(A7, self.W[7])  + self.b[7])
+		A9  = relu(pt.dot(A8, self.W[8])  + self.b[8])
 		# A10 = relu(pt.dot(A9, self.W[9])  + self.b[9])
 		# A11 = relu(pt.dot(A10,self.W[10]) + self.b[10])
 		# A12 = relu(pt.dot(A11,self.W[11]) + self.b[11])
@@ -323,7 +323,7 @@ class MLP_logg:
 		# A15 = relu(pt.dot(A14,self.W[14]) + self.b[14])
 		# A16 = relu(pt.dot(A15,self.W[15]) + self.b[15])
 		# Final linear output (no activation) gives targets for mass + photometry bands
-		targets = pt.dot(A7, self.W[7]) + self.b[7]
+		targets = pt.dot(A9, self.W[9]) + self.b[9]
 
 		return targets
 
@@ -336,20 +336,22 @@ if __name__ == "__main__":
 	import pandas as pn
 	import matplotlib.pyplot as plt
 	import seaborn as sns
+	import bisect
 
 	dir_base = "/home/jolivares/Models/PARSEC/Gaia_EDR3_10-400Myr/"
 
 	file_iso      = dir_base + "Gaia_EDR3_10-400Myr.dat"
 	file_mlp_phot = dir_base + "MLPs/Phot_l12_s256/mlp.pkl"
-	file_mlp_logg = dir_base + "MLPs/Logg_l7_s256/mlp.pkl"
+	file_mlp_logg = dir_base + "MLPs/Logg_l9_s256/mlp.pkl"
 
 	mlp_phot = MLP_phot(file_mlp=file_mlp_phot)
 	mlp_logg = MLP_logg(file_mlp=file_mlp_logg)
 
 	# Example: load an isochrone from a parametrized CSV and overlay predicted photometry
 	age = 50.
+	max_label = 1
 
-	df_iso = pd.read_csv(file_iso,
+	df_iso = pn.read_csv(file_iso,
 					skiprows=13,
 					delimiter=r"\s+",
 					header="infer",
@@ -357,21 +359,24 @@ if __name__ == "__main__":
 	df_iso = df_iso.loc[df_iso["label"]<= max_label]
 	df_iso["age"] = np.pow(10.,df_iso["logAge"])/1.0e6
 	df_iso["Teff"] = np.pow(10.,df_iso["logTe"])
-	df_iso = df_iso.loc[:,sum([features,targets],[])]
+	dfg_iso = df_iso.groupby("age")
+	ages = sorted(list(dfg_iso.groups.keys()))
+	index = bisect.bisect(ages, age)
+	age = ages[index]
+	df_iso = dfg_iso.get_group(age)
 	print(df_iso.describe())
-	df_iso = df_iso.groupby("age").get_group(age).copy()
 
 	mass  = df_iso["Mini"].to_numpy()
 	teff  = df_iso["Teff"].to_numpy()
-	n_stars = len(theta) 
+	n_stars = len(mass) 
 
-	absolute_photometry = mlp_phot(age,mass,teff,n_stars)
+	abs_phot = mlp_phot(age,mass,teff,n_stars)
+	logg = mlp_logg(age,mass,teff,n_stars)
 	df_prd = pn.DataFrame(
-		data=absolute_photometry.eval(),
+		data=abs_phot.eval(),
 		columns=mlp_phot.targets)
 	df_prd["Mini"] = mass
 	df_prd["Teff"] = teff
-	logg = mlp_logg(age,mass,teff,n_stars)
 	df_prd["logg"] = logg.eval()
 
 	# Simple diagnostic plot to visually compare trained MLP predictions with input isochrone

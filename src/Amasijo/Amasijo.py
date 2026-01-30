@@ -720,7 +720,7 @@ class Amasijo(object):
 		frac_rvs_obs = fraction_radial_velocities_observed
 
 		g_mag_shift_for_uncertainty = g_mag_shift_for_uncertainty if \
-		g_mag_shift_for_uncertainty is not None else {"astrometry":0.0,"spectroscopy":0.0}
+		g_mag_shift_for_uncertainty is not None else {"astrometry":0.0,"GRVS":0.0}
 
 		assert frac_rvs_obs is None or isinstance(frac_rvs_obs,float),\
 		"Error: fraction_radial_velocities_observed must be float or None"
@@ -1018,7 +1018,7 @@ class Amasijo(object):
 
 		#--------- Data Frames -------------------------------
 		df_obs_sp = pd.DataFrame(data=obs_sp,
-					columns=["Teff","logg"])
+					columns=["Teff_obs","logg_obs"])
 		df_unc_sp = pd.DataFrame(data=unc_sp,
 					columns=["Teff_error","logg_error"])
 		df_sp = pd.concat(
@@ -1413,7 +1413,7 @@ if __name__ == "__main__":
 	distance  = 200.0
 	model     = "PARSEC"
 	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Test/"
-	dir_mlps  = "/home/jolivares/Repos/Huehueti/mlps/PARSEC/"
+	dir_mlps  = "/home/jolivares/Models/PARSEC/Gaia_EDR3_10-400Myr/MLPs/"
 	base_name = "{0}_n{1}_d{2}_s{3}".format(model,n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
@@ -1438,9 +1438,10 @@ if __name__ == "__main__":
 		"Av": 0.0
 		},
 	"PARSEC_args":{
-		"file_mlp_phot":dir_mlps+"Gaia_l12_s256/mlp.pkl",
+		"file_mlp_phot":dir_mlps+"Phot_l12_s256/mlp.pkl",
+		"file_mlp_logg":dir_mlps+"Logg_l9_s256/mlp.pkl",
 		"mass_limits":[0.1,4.0],
-		"logTe_limits":[3.4,4.0],
+		"teff_limits":[2550.0,15000.0],
 		},
 	"bands":["G","BP","RP"]
 	}
