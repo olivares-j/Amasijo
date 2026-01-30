@@ -40,6 +40,9 @@ class Amasijo(object):
 					radial_velocity={
 						"labels":{"radial_velocity":"radial_velocity"},
 						"family":"Gaia"},
+					spectroscopy={
+						"Teff_uncertainty":100.0,
+						"logg_uncertainty":0.1},
 					additional_columns={"ruwe":1.0},
 					reference_system="Galactic",
 					release="dr3",
@@ -610,26 +613,22 @@ class Amasijo(object):
 			#-----------------------------------------------------------------
 		elif self.isochrones_args["model"] == "PARSEC":
 			
-			from .PARSEC import MLP_phot,MLP_mass
+			from .PARSEC.MLPs import MLP_phot, MLP_logg
 			
 			mlp_phot = MLP_phot(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_phot"])
-			mlp_mass = MLP_mass(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_mass"])
+			mlp_logg = MLP_logg(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_logg"])
 
-			assert (self.isochrones_args["PARSEC_args"]["theta_limits"][0] >= mlp_phot.theta_domain[0]) &\
-				(self.isochrones_args["PARSEC_args"]["theta_limits"][1] <= mlp_phot.theta_domain[1]),"ERROR:"+\
-				"theta_limits outside the PARSEC mlp_phot domain"
+			assert (self.isochrones_args["PARSEC_args"]["mass_limits"][0] >= mlp_phot.mass_domain[0]) &\
+				(self.isochrones_args["PARSEC_args"]["mass_limits"][1] <= mlp_phot.mass_domain[1]),"ERROR:"+\
+				"mass_limits outside the PARSEC mlp_phot domain"
 
-			assert (self.isochrones_args["PARSEC_args"]["theta_limits"][0] >= mlp_mass.theta_domain[0]) &\
-				(self.isochrones_args["PARSEC_args"]["theta_limits"][1] <= mlp_mass.theta_domain[1]),"ERROR:"+\
-				"theta_limits outside the PARSEC mlp_mass domain"
+			assert (self.isochrones_args["PARSEC_args"]["teff_limits"][0] >= mlp_phot.teff_domain[0]) &\
+				(self.isochrones_args["PARSEC_args"]["teff_limits"][1] <= mlp_phot.teff_domain[1]),"ERROR:"+\
+				"teff_limits outside the PARSEC mlp_phot domain"
 
 			assert (self.isochrones_args["age"] >= float(mlp_phot.age_domain[0])) &\
 				(self.isochrones_args["age"] <= float(mlp_phot.age_domain[1])),"ERROR:"+\
 				"Input age outside the PARSEC mlp_phot domain"
-
-			assert (self.isochrones_args["age"] >= float(mlp_mass.age_domain[0])) &\
-				(self.isochrones_args["age"] <= float(mlp_mass.age_domain[1])),"ERROR:"+\
-				"Input age outside the PARSEC mlp_mass domain"
 
 			#---------- Selected bands --------------------------------------------------------------
 			parsec_bands = np.array([band.replace("G_","").replace("mag","") for band in mlp_phot.targets])
@@ -642,21 +641,28 @@ class Amasijo(object):
 			idx_bands = np.where(np.isin(requested_bands,parsec_bands))[0]
 			#-------------------------------------------------------------------------------------------
 
-			#------------ Theta ------------------------------
-			theta = np.random.uniform(
-				low=self.isochrones_args["PARSEC_args"]["theta_limits"][0],
-				high=self.isochrones_args["PARSEC_args"]["theta_limits"][1],
+			#------------ Mass and LogTe ------------------------------
+			mass = np.random.uniform(
+				low=self.isochrones_args["PARSEC_args"]["mass_limits"][0],
+				high=self.isochrones_args["PARSEC_args"]["mass_limits"][1],
+				size=n_stars)
+			teff = np.random.uniform(
+				low=self.isochrones_args["PARSEC_args"]["teff_limits"][0],
+				high=self.isochrones_args["PARSEC_args"]["teff_limits"][1],
 				size=n_stars)
 			#--------------------------------------------------
 
-			#------ Mass and absolute photometry ----------
+			#------ Absolute photometry and logg----------
 			absolute_photometry = mlp_phot(
 				age=self.isochrones_args["age"],
-				theta=theta,
+				mass=mass,
+				teff=teff,
 				n_stars=n_stars)
-			mass_logTe_logg = mlp_mass(
+
+			logg = mlp_logg(
 				age=self.isochrones_args["age"],
-				theta=theta,
+				mass=mass,
+				teff=teff,
 				n_stars=n_stars)
 			#----------------------------------------------
 
@@ -673,13 +679,10 @@ class Amasijo(object):
 			df_abs = pd.DataFrame(
 				data=absolute_photometry.eval(),
 				columns=["abs_"+band for band in mlp_phot.targets])
-			df_mTg = pd.DataFrame(
-				data=mass_logTe_logg.eval(),
-				columns=mlp_mass.targets)
-			df_mTg["Teff"] = np.power(10,df_mTg["logTe"])
-			df_mTg.rename(columns={"Mini":"mass"},inplace=True)
-			df_abs["theta"] = theta
-			df_abs = df_abs.join(df_mTg)
+			df_abs["mass"] = mass
+			df_abs["Teff"] = teff
+			df_abs["logg"] = logg.eval()
+
 			df_apa = pd.DataFrame(
 				data=photometry,
 				columns=[band+"_mag" for band in requested_bands])
@@ -690,6 +693,7 @@ class Amasijo(object):
 			sys.exit("ERROR: model currently not supported")
 
 
+		df_ph["distances"] = distances
 
 		assert np.all(np.isfinite(df_ph["G_mag"])),"ERROR: There are missing values in the photometry!"
 
@@ -711,6 +715,7 @@ class Amasijo(object):
 				g_mag_shift_for_uncertainty=None,
 				impute_radial_velocity=False,
 				fraction_radial_velocities_observed=None,
+				spectroscopic_uncertainty=None,
 				):
 		frac_rvs_obs = fraction_radial_velocities_observed
 
@@ -727,7 +732,8 @@ class Amasijo(object):
 		#---- Astrometric and photometric values ------
 		true_as = true.loc[:,self.labels_true_as].copy()
 		true_ph = true.loc[:,["G_mag","BP_mag","RP_mag"]].copy()
-		true_sp = true.loc[:,["G_mag","BP_mag","RP_mag","Teff","logg"]].copy()
+		true_sp = true.loc[:,["Teff","logg"]]
+		true_grvs = true.loc[:,["G_mag","BP_mag","RP_mag","Teff","logg"]].copy()
 		true_bands = true.loc[:,self.labels_true_bands].copy()
 		index = true.index
 		del true
@@ -738,7 +744,7 @@ class Amasijo(object):
 		# file:///home/jolivares/Downloads/GAIA-C5-TN-UB-CJ-041.pdf
 		# G − GRVS = 0.0386 + 0.9457*(BP-RP) - 0.1149*(BP-RP)**2 + 0.0022 (BP-RP)**3 + E(0.06)
 		# GRVS = G - 0.0386 - 0.9457*(BP-RP) + 0.1149*(BP-RP)**2 - 0.0022 (BP-RP)**3
-		true_sp["GRVS_mag"] = true_sp.apply(lambda x: 
+		true_grvs["GRVS_mag"] = true_grvs.apply(lambda x: 
 			x["G_mag"] - 0.0386 - 0.9457*(x["BP_mag"]-x["RP_mag"]) + 
 			0.1149*((x["BP_mag"]-x["RP_mag"])**2) - 0.0022+((x["BP_mag"]-x["RP_mag"])**3),
 			axis=1)
@@ -747,10 +753,15 @@ class Amasijo(object):
 		#================== Uncertainties ================================
 		#------- Apply photometric shift to compute astrometric uncertainties------
 		shifted_G_mag_as = true_ph["G_mag"]    + g_mag_shift_for_uncertainty["astrometry"]
-		shifted_G_mag_sp = true_sp["GRVS_mag"] + g_mag_shift_for_uncertainty["spectroscopy"]
+		shifted_G_mag_grvs = true_grvs["GRVS_mag"] + g_mag_shift_for_uncertainty["GRVS"]
 		#---------------------------------------------------------------------------
-		
 
+		#------------- Spectroscopy ------------------------
+		teff_unc = np.full(N,fill_value=spectroscopic_uncertainty["teff"])
+		logg_unc = np.full(N,fill_value=spectroscopic_uncertainty["logg"])
+		#--------------------------------------------------
+		
+		#-------------------- Gaia -------------------------------------------------------------
 		ra_unc,dec_unc = position_uncertainty(shifted_G_mag_as,
 							release=self.release) # In micro-arcseconds
 
@@ -761,9 +772,9 @@ class Amasijo(object):
 							release=self.release) # In micro-arcseconds per year
 
 		if self.radial_velocity["family"] == "Gaia":
-			rvl_unc = radial_velocity_uncertainty(grvs=shifted_G_mag_sp,
-								teff=true_sp["Teff"],
-								logg=true_sp["logg"],
+			rvl_unc = radial_velocity_uncertainty(grvs=shifted_G_mag_grvs,
+								teff=true_grvs["Teff"],
+								logg=true_grvs["logg"],
 								release=self.release) # km per second
 		elif self.radial_velocity["family"] == "Uniform":
 			print("rv_uncertainty ~ Uniform(limits) [km.s-1]")
@@ -802,8 +813,8 @@ class Amasijo(object):
 		rp_unc[idx_rp]  = magnitude_uncertainty(band="rp",
 							maglist=true_ph["RP_mag"][idx_rp], 
 							release=self.release) # In mmag
-		del true_sp
-		#------------------------------------------------------------
+		del true_grvs
+		#---------------------------------------------------------------------------------------------
 
 		#--- Correct units ----
 		# Micro to mili arcsec
@@ -822,10 +833,12 @@ class Amasijo(object):
 		unc_as = np.column_stack((ra_unc,dec_unc,plx_unc,
 								  mua_unc,mud_unc,rvl_unc))
 		unc_ph = np.column_stack((g_unc,bp_unc,rp_unc))
+
+		unc_sp = np.column_stack((teff_unc,logg_unc))
 		#---------------------------------------------------
 		#==================================================================
 
-		#================= Astrometry =================================
+		#================= Astrometry ======================================================
 		#-------------- Missing rvel ----------------------------------------------------
 		idx_nan_rvl = np.where(np.isnan(rvl_unc))[0]
 		idx_obs_rvl = np.where(np.isfinite(rvl_unc))[0]
@@ -913,7 +926,6 @@ class Amasijo(object):
 						mean=mu,cov=np.diag(unc_as[i]**2),
 						tol=1e-8,method="cholesky",size=1)
 			#-----------------------------------------------
-		#=====================================================================
 
 		if impute_radial_velocity:
 			#------ Radial velocity mean and std -------
@@ -955,7 +967,7 @@ class Amasijo(object):
 		del df_obs_as,df_unc_as,df_cor_as,obs_as,unc_as
 		#===========================================================
 
-		#======= Photometry ===================================
+		#======= Photometry ====================================================================
 		#----- Gaia -------------------------
 		obs_ph = np.empty((N,3))
 		for i,mu in true_ph.iterrows():
@@ -976,7 +988,7 @@ class Amasijo(object):
 					tol=1e-8,method="cholesky",size=1)
 		#-----------------------------------------------
 
-		#--------- Data Frames ------------------
+		#--------- Data Frames -------------------------------
 		df_obs_ph = pd.DataFrame(data=obs_ph,
 					columns=self.labels_obs_ph)
 		df_unc_ph = pd.DataFrame(data=unc_ph,
@@ -989,16 +1001,38 @@ class Amasijo(object):
 		df_ph = pd.concat(
 			[df_obs_ph,df_unc_ph,df_obs_bands,df_unc_bands],
 			ignore_index=False,axis=1)
-		#-----------------------------------------
+		#-----------------------------------------------------
 
 		del df_obs_ph,df_unc_ph,obs_ph,unc_ph
 		del df_obs_bands,df_unc_bands,obs_bands,unc_bands
-		#===========================================
+		#=========================================================================================
 
-		#------- Join ------------
-		df_obs = df_as.join(df_ph)
-		del df_as,df_ph
-		#-------------------------
+		#======= Spectroscopy ====================================================================
+		#----- Gaia ------------------------------------
+		obs_sp = np.empty((N,2))
+		for i,mu in true_sp.iterrows():
+			obs_sp[i] = rng.multivariate_normal(
+					mean=mu,cov=np.diag(unc_sp[i]**2),
+					tol=1e-8,method="cholesky",size=1)
+		#-----------------------------------------------
+
+		#--------- Data Frames -------------------------------
+		df_obs_sp = pd.DataFrame(data=obs_sp,
+					columns=["Teff","logg"])
+		df_unc_sp = pd.DataFrame(data=unc_sp,
+					columns=["Teff_error","logg_error"])
+		df_sp = pd.concat(
+			[df_obs_sp,df_unc_sp],
+			ignore_index=False,axis=1)
+		#-----------------------------------------------------
+
+		del df_obs_sp,df_unc_sp
+		#=========================================================================================
+
+		#------- Join --------------------------
+		df_obs = df_as.join(df_ph).join(df_sp)
+		del df_as,df_ph,df_sp
+		#----------------------------------------
 
 		#--------------- Additional columns -------------
 		for key,value in self.additional_columns.items():
@@ -1028,7 +1062,9 @@ class Amasijo(object):
 						impute_radial_velocity=False,
 						g_mag_shift_for_uncertainty=None,
 						fraction_radial_velocities_observed=None,
-						max_mahalanobis_distance=np.inf,max_n=2):
+						spectroscopic_uncertainty={"teff":100.,"logg":0.1},
+						max_mahalanobis_distance=np.inf,
+						max_n=2):
 
 		if hasattr(self,"mcluster_args"):
 			#--------------- Generate McLuster file ------------
@@ -1104,7 +1140,8 @@ class Amasijo(object):
 		soil_mag_uncertainty=soil_mag_uncertainty,
 		impute_radial_velocity=impute_radial_velocity,
 		g_mag_shift_for_uncertainty=g_mag_shift_for_uncertainty,
-		fraction_radial_velocities_observed=fraction_radial_velocities_observed)
+		fraction_radial_velocities_observed=fraction_radial_velocities_observed,
+		spectroscopic_uncertainty=spectroscopic_uncertainty)
 		#----------------------------------------------------------
 
 		#-------- Join data frames -----------------------------
@@ -1401,9 +1438,9 @@ if __name__ == "__main__":
 		"Av": 0.0
 		},
 	"PARSEC_args":{
-		"file_mlp_phot":dir_mlps+"GP2_l9_s512/mlp.pkl",
-		"file_mlp_mass":dir_mlps+"mTg_l7_s256/mlp.pkl",
-		"theta_limits":[1e-5,0.9]
+		"file_mlp_phot":dir_mlps+"Gaia_l12_s256/mlp.pkl",
+		"mass_limits":[0.1,4.0],
+		"logTe_limits":[3.4,4.0],
 		},
 	"bands":["G","BP","RP"]
 	}
