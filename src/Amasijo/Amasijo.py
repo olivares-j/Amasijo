@@ -668,7 +668,6 @@ class Amasijo(object):
 			absolute_photometry = mlp_phot(
 				age=self.isochrones_args["age"],
 				mass=mass,
-				teff=teff,
 				n_stars=n_stars).eval()
 			#----------------------------------------------
 
