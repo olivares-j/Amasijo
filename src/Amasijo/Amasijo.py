@@ -41,7 +41,7 @@ class Amasijo(object):
 						"labels":{"radial_velocity":"radial_velocity"},
 						"family":"Gaia"},
 					spectroscopy={
-						"Teff_uncertainty":100.0,
+						"teff_uncertainty":100.0,
 						"logg_uncertainty":0.1},
 					additional_columns={"ruwe":1.0},
 					reference_system="Galactic",
@@ -613,18 +613,23 @@ class Amasijo(object):
 			#-----------------------------------------------------------------
 		elif self.isochrones_args["model"] == "PARSEC":
 			
-			from .PARSEC.MLPs import MLP_phot, MLP_logg
+			from .PARSEC.MLPs import MLP_phot, MLP_teff, MLP_logg
 			
 			mlp_phot = MLP_phot(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_phot"])
+			mlp_teff = MLP_teff(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_teff"])
 			mlp_logg = MLP_logg(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_logg"])
+
+			assert (mlp_phot.age_domain == mlp_teff.age_domain) &\
+				(mlp_phot.age_domain == mlp_logg.age_domain),"ERROR:"+\
+				"The age limits of the mlps do not coincide"
+
+			assert (mlp_phot.mass_domain == mlp_teff.mass_domain) &\
+				(mlp_phot.mass_domain == mlp_logg.mass_domain),"ERROR:"+\
+				"The mass limits of the mlps do not coincide"
 
 			assert (self.isochrones_args["PARSEC_args"]["mass_limits"][0] >= mlp_phot.mass_domain[0]) &\
 				(self.isochrones_args["PARSEC_args"]["mass_limits"][1] <= mlp_phot.mass_domain[1]),"ERROR:"+\
 				"mass_limits outside the PARSEC mlp_phot domain"
-
-			assert (self.isochrones_args["PARSEC_args"]["teff_limits"][0] >= mlp_phot.teff_domain[0]) &\
-				(self.isochrones_args["PARSEC_args"]["teff_limits"][1] <= mlp_phot.teff_domain[1]),"ERROR:"+\
-				"teff_limits outside the PARSEC mlp_phot domain"
 
 			assert (self.isochrones_args["age"] >= float(mlp_phot.age_domain[0])) &\
 				(self.isochrones_args["age"] <= float(mlp_phot.age_domain[1])),"ERROR:"+\
@@ -641,33 +646,34 @@ class Amasijo(object):
 			idx_bands = np.where(np.isin(requested_bands,parsec_bands))[0]
 			#-------------------------------------------------------------------------------------------
 
-			#------------ Mass and LogTe ------------------------------
+			#------------ Mass ------------------------------
 			mass = np.random.uniform(
 				low=self.isochrones_args["PARSEC_args"]["mass_limits"][0],
 				high=self.isochrones_args["PARSEC_args"]["mass_limits"][1],
 				size=n_stars)
-			teff = np.random.uniform(
-				low=self.isochrones_args["PARSEC_args"]["teff_limits"][0],
-				high=self.isochrones_args["PARSEC_args"]["teff_limits"][1],
-				size=n_stars)
 			#--------------------------------------------------
 
-			#------ Absolute photometry and logg----------
+			#-------- Teff & Logg -------------------
+			teff = mlp_teff(
+				age=self.isochrones_args["age"],
+				mass=mass,
+				n_stars=n_stars).eval().flatten()
+			logg = mlp_logg(
+				age=self.isochrones_args["age"],
+				mass=mass,
+				n_stars=n_stars).eval().flatten()
+			#-----------------------------------------
+
+			#------ Absolute photometry ----------
 			absolute_photometry = mlp_phot(
 				age=self.isochrones_args["age"],
 				mass=mass,
 				teff=teff,
-				n_stars=n_stars)
-
-			logg = mlp_logg(
-				age=self.isochrones_args["age"],
-				mass=mass,
-				teff=teff,
-				n_stars=n_stars)
+				n_stars=n_stars).eval()
 			#----------------------------------------------
 
 			#---------- Apparent photometry -----------
-			apparent_photometry = absolute_photometry.eval() \
+			apparent_photometry = absolute_photometry \
 					+ 5.0*np.log10(distances)[:,np.newaxis] - 5.0
 			#-----------------------------------------
 
@@ -677,11 +683,11 @@ class Amasijo(object):
 
 			#------------- Data frame ----------------------
 			df_abs = pd.DataFrame(
-				data=absolute_photometry.eval(),
+				data=absolute_photometry,
 				columns=["abs_"+band for band in mlp_phot.targets])
 			df_abs["mass"] = mass
 			df_abs["Teff"] = teff
-			df_abs["logg"] = logg.eval()
+			df_abs["Logg"] = logg
 
 			df_apa = pd.DataFrame(
 				data=photometry,
@@ -732,8 +738,8 @@ class Amasijo(object):
 		#---- Astrometric and photometric values ------
 		true_as = true.loc[:,self.labels_true_as].copy()
 		true_ph = true.loc[:,["G_mag","BP_mag","RP_mag"]].copy()
-		true_sp = true.loc[:,["Teff","logg"]]
-		true_grvs = true.loc[:,["G_mag","BP_mag","RP_mag","Teff","logg"]].copy()
+		true_sp = true.loc[:,["Teff","Logg"]]
+		true_grvs = true.loc[:,["G_mag","BP_mag","RP_mag","Teff","Logg"]].copy()
 		true_bands = true.loc[:,self.labels_true_bands].copy()
 		index = true.index
 		del true
@@ -774,7 +780,7 @@ class Amasijo(object):
 		if self.radial_velocity["family"] == "Gaia":
 			rvl_unc = radial_velocity_uncertainty(grvs=shifted_G_mag_grvs,
 								teff=true_grvs["Teff"],
-								logg=true_grvs["logg"],
+								logg=true_grvs["Logg"],
 								release=self.release) # km per second
 		elif self.radial_velocity["family"] == "Uniform":
 			print("rv_uncertainty ~ Uniform(limits) [km.s-1]")
@@ -1018,9 +1024,9 @@ class Amasijo(object):
 
 		#--------- Data Frames -------------------------------
 		df_obs_sp = pd.DataFrame(data=obs_sp,
-					columns=["Teff_obs","logg_obs"])
+					columns=["teff","logg"])
 		df_unc_sp = pd.DataFrame(data=unc_sp,
-					columns=["Teff_error","logg_error"])
+					columns=["teff_error","logg_error"])
 		df_sp = pd.concat(
 			[df_obs_sp,df_unc_sp],
 			ignore_index=False,axis=1)
@@ -1410,10 +1416,10 @@ if __name__ == "__main__":
 
 	seed      = 0
 	n_stars   = 100
-	distance  = 200.0
+	distance  = 10.0
 	model     = "PARSEC"
 	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Test/"
-	dir_mlps  = "/home/jolivares/Models/PARSEC/Gaia_EDR3_10-400Myr/MLPs/"
+	dir_mlps  = "/home/jolivares/Models/PARSEC/Gaia_EDR3_15-400Myr/MLPs/"
 	base_name = "{0}_n{1}_d{2}_s{3}".format(model,n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
@@ -1438,10 +1444,10 @@ if __name__ == "__main__":
 		"Av": 0.0
 		},
 	"PARSEC_args":{
-		"file_mlp_phot":dir_mlps+"Phot_l12_s256/mlp.pkl",
-		"file_mlp_logg":dir_mlps+"Logg_l9_s256/mlp.pkl",
+		"file_mlp_phot":dir_mlps+"Phot_l9_s256/mlp.pkl",
+		"file_mlp_teff":dir_mlps+"Teff_l10_s256/mlp.pkl",
+		"file_mlp_logg":dir_mlps+"Logg_l10_s256/mlp.pkl",
 		"mass_limits":[0.1,4.0],
-		"teff_limits":[2550.0,15000.0],
 		},
 	"bands":["G","BP","RP"]
 	}

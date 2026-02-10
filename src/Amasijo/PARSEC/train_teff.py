@@ -9,7 +9,6 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, PowerTransformer
 from mlp_model import create_custom_model
 
-
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 train = False
@@ -17,8 +16,8 @@ train = False
 # ------------------------------ Model properties --------------------------------
 max_label = 1
 features = ["age","Mini"]
-targets  = ['Gmag', 'G_BPmag', 'G_RPmag']#, 'gP1mag', 'rP1mag', 'iP1mag','zP1mag','yP1mag','Jmag', 'Hmag', 'Ksmag']
-list_of_num_layers = [1,2,3,4,5,6,7,8,9,10,11,12,13] # Number of hidden layers
+targets  = ["Teff"]
+list_of_num_layers = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20] # Number of hidden layers
 list_of_size_layers = [128,256,512]  # Units in each hidden layer
 training_epochs = [9999,9999,9999]
 learning_rates  = [1e-3,1e-4,1e-5]
@@ -33,8 +32,8 @@ dir_base  = "/home/jolivares/Models/PARSEC/Gaia_EDR3_15-400Myr/"
 file_iso  = dir_base + "output.dat" 
 dir_mlps  = dir_base + "MLPs/"
 
-file_mad  = dir_mlps +"Phot_MAD.png"
-base_fld  = "Phot_l{0}_s{1}/"
+file_mad  = dir_mlps +"Teff_MAD.png"
+base_fld  = "Teff_l{0}_s{1}/"
 base_dat  = "{0}data.csv"
 base_mlp  = "{0}mlp.pkl"
 base_lss  = "{0}loss.png"
@@ -95,7 +94,6 @@ for size_layers in list_of_size_layers:
 			phot_min = df_iso[targets].min()
 			age_domain = [df_iso["age"].min(),df_iso["age"].max()]
 			mass_domain = [df_iso["Mini"].min(),df_iso["Mini"].max()]
-			# teff_domain = [df_iso["Teff"].min(),df_iso["Teff"].max()]
 			#-------------------------------------------------------------------------
 
 			batch_size   = int(batch_fraction*df_iso.shape[0])
@@ -140,8 +138,7 @@ for size_layers in list_of_size_layers:
 					"phot_min":phot_min,
 					"targets":targets,
 					"age_domain":age_domain,
-					"mass_domain":mass_domain,
-					# "teff_domain":teff_domain
+					"mass_domain":mass_domain
 					}
 
 				with open(file_mlp, "wb") as file:
@@ -171,9 +168,6 @@ for size_layers in list_of_size_layers:
 			fig.savefig(base_lss.format(dir_case))
 			plt.close()
 
-
-		
-
 		#---------- Instantiate model ---------------------
 		model = create_custom_model(
 				input_shape=len(features), 
@@ -199,20 +193,20 @@ for size_layers in list_of_size_layers:
 		input_tst = scalers[1].transform(scalers[0].transform(df_features.to_numpy()))
 		ouput_tst = model(input_tst,training=False)
 
-		df_bands = pd.DataFrame(columns=targets,data=ouput_tst._numpy())
-		df_prd = pd.concat([df_features,df_bands],axis=1,ignore_index=False)
+		df_tar = pd.DataFrame(columns=targets,data=ouput_tst._numpy())
+		df_prd = pd.concat([df_features,df_tar],axis=1,ignore_index=False)
 
-		df = pd.merge(left=df_tst,right=df_bands,left_index=True,right_index=True,suffixes=["_tst","_prd"])
+		df = pd.merge(left=df_tst,right=df_tar,left_index=True,right_index=True,suffixes=["_tst","_prd"])
 		df.set_index(features,drop=True,inplace=True)
 
 		for trgt in targets:
-			df[trgt] = df.apply(lambda x: (x[trgt+"_prd"]-x[trgt+"_tst"]),axis=1)
+			df[trgt] = df.apply(lambda x: (x[trgt+"_prd"]-x[trgt+"_tst"])/x[trgt+"_tst"],axis=1)
 
 		#--------- Save for general plot---------------------
 		tmp = pd.DataFrame(data={
-			"MAD":df.loc[:,targets].abs().max().to_numpy().max(),
+			"MAD":df.loc[:,targets].abs().max().to_numpy(),
 			"num_layers":num_layers,
-			"size_layers":size_layers},index=[0])
+			"size_layers":size_layers})
 		tmp.set_index("num_layers",inplace=True)
 		mads.append(tmp)
 		#----------------------------------------------------
@@ -221,6 +215,7 @@ for size_layers in list_of_size_layers:
 		df.columns = ["age","Mini","target","value"]
 		print(df.describe())
 
+
 		fig, ax = plt.subplots(1, 1, figsize=(16, 8))
 		ax = sns.scatterplot(data=df,
 							x="Mini",
@@ -228,30 +223,27 @@ for size_layers in list_of_size_layers:
 							hue="age",
 							style="target",
 							zorder=0)
-		ax.set_xlabel("Mini [Msun]")
-		ax.set_ylabel("(Predicted-Test)")
+		ax.set_xlabel("Mass [Msun]")
+		ax.set_ylabel("(Predicted-Test)/Test")
 		plt.legend(bbox_to_anchor=(1.01, 0.5), loc="center left")
 		fig.savefig(base_err.format(dir_case))
 		plt.close()
 
-		# df_tst.loc[:,"color"] = df_tst.apply(lambda x: x["Gmag"]-x["G_RPmag"],axis=1)
-		# df_prd.loc[:,"color"] = df_prd.apply(lambda x: x["Gmag"]-x["G_RPmag"],axis=1)
-
 		ax = sns.scatterplot(data=df_tst,
 				x="Mini",
-				y="Gmag",
+				y="Teff",
 				hue="age",
 				zorder=0)
 		ax = sns.lineplot(data=df_prd,
 				x="Mini",
-				y="Gmag",
+				y="Teff",
 				hue="age",
 				legend=False,
 				sort=False,
 				zorder=1,
 				ax=ax)
-		ax.set_xlabel("Mini [Msun]")
-		ax.set_ylabel("G [mag]")
+		ax.set_xlabel("Mini")
+		ax.set_ylabel("Teff")
 		plt.savefig(base_fit.format(dir_case))
 		plt.close()
 
