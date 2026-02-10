@@ -581,8 +581,8 @@ class Amasijo(object):
 
 		return df_as,r
 
-	def _generate_true_photometry(self,distances):
-		n_stars = len(distances)
+	def _generate_true_photometry(self,distance):
+		n_stars = len(distance)
 
 		if self.isochrones_args["model"] == "MIST":
 			assert np.all(self.isochrones_args["MIST_args"]["mass_limits"][0]>= 0.1),\
@@ -607,7 +607,7 @@ class Amasijo(object):
 					mass=masses, 
 					age=np.log10(self.isochrones_args["age"]*1.e6), 
 					feh=self.isochrones_args["MIST_args"]["metallicity"], 
-					distance=distances, 
+					distance=distance, 
 					AV=self.isochrones_args["MIST_args"]["Av"],
 					return_df=True)
 			#-----------------------------------------------------------------
@@ -673,7 +673,7 @@ class Amasijo(object):
 
 			#---------- Apparent photometry -----------
 			apparent_photometry = absolute_photometry \
-					+ 5.0*np.log10(distances)[:,np.newaxis] - 5.0
+					+ 5.0*np.log10(distance)[:,np.newaxis] - 5.0
 			#-----------------------------------------
 
 			#--------- Selected bands -----------------------------
@@ -698,7 +698,7 @@ class Amasijo(object):
 			sys.exit("ERROR: model currently not supported")
 
 
-		df_ph["distances"] = distances
+		df_ph["distance"] = distance
 
 		assert np.all(np.isfinite(df_ph["G_mag"])),"ERROR: There are missing values in the photometry!"
 
@@ -1126,12 +1126,12 @@ class Amasijo(object):
 
 		#--------- True astrometry -----------------------
 		print("Generating true astrometry ...")
-		df_as,distances = self._generate_true_astrometry(X)
+		df_as,distance = self._generate_true_astrometry(X)
 		#--------------------------------------------------
 
 		#--------- True photometry -------------------------------
 		print("Generating true photometry ...")
-		df_ph = self._generate_true_photometry(distances)
+		df_ph = self._generate_true_photometry(distance)
 		#---------------------------------------------------------
 
 		#---- Join true values ----------------
