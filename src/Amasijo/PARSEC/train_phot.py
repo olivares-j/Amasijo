@@ -12,14 +12,14 @@ from mlp_model import create_custom_model
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-train = False
+train = True
 
 # ------------------------------ Model properties --------------------------------
 max_label = 1
 features = ["age","Mini"]
 targets  = ['Gmag', 'G_BPmag', 'G_RPmag']#, 'gP1mag', 'rP1mag', 'iP1mag','zP1mag','yP1mag','Jmag', 'Hmag', 'Ksmag']
-list_of_num_layers = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16] # Number of hidden layers
-list_of_size_layers = [128,256,512]  # Units in each hidden layer
+list_of_num_layers = [1,2,3,4,5,6,7,8,9,10] # Number of hidden layers
+list_of_size_layers = [256]  # Units in each hidden layer
 training_epochs = [9999,9999,9999]
 learning_rates  = [1e-3,1e-4,1e-5]
 activation_layers = "relu" # Activation functions for each hidden layer
@@ -28,7 +28,7 @@ batch_fraction = 1.0
 #--------------------------------------------------------------------------
 
 #--------------- Directories and files ---------------------------------------------
-dir_base  = "/home/jolivares/Models/PARSEC/Gaia_EDR3_15-400Myr/"
+dir_base  = "/home/jolivares/Models/PARSEC/Gaia_EDR3/100-500Myr/"
 # Remove the # from the row contain the header in the input file
 file_iso  = dir_base + "output.dat" 
 dir_mlps  = dir_base + "MLPs/"
@@ -49,7 +49,7 @@ df_iso = pd.read_csv(file_iso,
 					header="infer",
 					comment="#")
 df_iso = df_iso.loc[df_iso["label"]<= max_label]
-df_iso["age"] = np.pow(10.,df_iso["logAge"])/1.0e6
+df_iso["age"] = np.round(np.pow(10.,df_iso["logAge"])/np.pow(10.,6.0),decimals=1)
 df_iso["Teff"] = np.pow(10.,df_iso["logTe"])
 df_iso = df_iso.loc[:,sum([features,targets],[])]
 print(df_iso.describe())
@@ -128,7 +128,7 @@ for size_layers in list_of_size_layers:
 					raw_targets,
 					epochs=epochs,
 					batch_size=batch_size,
-					verbose=1)
+					verbose=0)
 				#----------------------------
 
 				#--------- Save --------------------

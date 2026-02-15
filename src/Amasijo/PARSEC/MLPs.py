@@ -455,7 +455,7 @@ if __name__ == "__main__":
 	import seaborn as sns
 	import bisect
 
-	dir_base = "/home/jolivares/Models/PARSEC/Gaia_EDR3_15-400Myr/"
+	dir_base = "/home/jolivares/Models/PARSEC/Gaia_EDR3/15-400Myr/"
 
 	file_iso      = dir_base + "output.dat"
 	file_mlp_phot = dir_base + "MLPs/Phot_l7_s512/mlp.pkl"
@@ -476,7 +476,7 @@ if __name__ == "__main__":
 					header="infer",
 					comment="#")
 	df_iso = df_iso.loc[df_iso["label"]<= max_label]
-	df_iso["age"] = np.pow(10.,df_iso["logAge"])/1.0e6
+	df_iso["age"] = np.round(np.pow(10.,df_iso["logAge"])/np.pow(10.,6.0),decimals=1)
 	df_iso["Teff"] = np.pow(10.,df_iso["logTe"])
 	dfg_iso = df_iso.groupby("age")
 	ages = sorted(list(dfg_iso.groups.keys()))

@@ -45,8 +45,8 @@ def create_custom_model(
 			Dense(
 				size_layers,
 				activation=activation_layers,
-				kernel_initializer=keras.initializers.RandomNormal(),
-				bias_initializer=keras.initializers.RandomNormal(),
+				kernel_initializer=keras.initializers.HeNormal(),
+				bias_initializer=keras.initializers.HeNormal(),
 			)
 		)
 
@@ -55,8 +55,8 @@ def create_custom_model(
 		Dense(
 			output_units,
 			activation=output_activation,
-			kernel_initializer=keras.initializers.RandomNormal(),
-			bias_initializer=keras.initializers.RandomNormal()
+			kernel_initializer=keras.initializers.HeNormal(),
+			bias_initializer=keras.initializers.HeNormal()
 		)
 	)
 

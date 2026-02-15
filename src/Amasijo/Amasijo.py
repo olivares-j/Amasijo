@@ -1418,7 +1418,7 @@ if __name__ == "__main__":
 	distance  = 10.0
 	model     = "PARSEC"
 	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Test/"
-	dir_mlps  = "/home/jolivares/Models/PARSEC/Gaia_EDR3_15-400Myr/MLPs/"
+	dir_mlps  = "/home/jolivares/Models/PARSEC/Gaia_EDR3/15-400Myr/MLPs/"
 	base_name = "{0}_n{1}_d{2}_s{3}".format(model,n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
@@ -1443,9 +1443,9 @@ if __name__ == "__main__":
 		"Av": 0.0
 		},
 	"PARSEC_args":{
-		"file_mlp_phot":dir_mlps+"Phot_l9_s256/mlp.pkl",
-		"file_mlp_teff":dir_mlps+"Teff_l10_s256/mlp.pkl",
-		"file_mlp_logg":dir_mlps+"Logg_l10_s256/mlp.pkl",
+		"file_mlp_phot":dir_mlps+"Phot_l7_s512/mlp.pkl",
+		"file_mlp_teff":dir_mlps+"Teff_l13_s256/mlp.pkl",
+		"file_mlp_logg":dir_mlps+"Logg_l16_s512/mlp.pkl",
 		"mass_limits":[0.1,4.0],
 		},
 	"bands":["G","BP","RP"]
