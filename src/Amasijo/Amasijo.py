@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.interpolate import splrep,splev
 from scipy.spatial import distance
+from extinction import ccm89
 
 from .functions import AngularSeparation,covariance_parallax,covariance_proper_motion
 
@@ -584,6 +585,13 @@ class Amasijo(object):
 	def _generate_true_photometry(self,distance):
 		n_stars = len(distance)
 
+		#------------ Extinctions ------------------------------
+		avs = np.random.uniform(
+				low=self.isochrones_args["Av_limits"][0],
+				high=self.isochrones_args["Av_limits"][1],
+				size=n_stars)
+		#--------------------------------------------------
+
 		if self.isochrones_args["model"] == "MIST":
 			assert np.all(self.isochrones_args["MIST_args"]["mass_limits"][0]>= 0.1),\
 			"Error: The lower mass allowed by the MIST model is 0.1. Adjust mass_limits!"
@@ -608,7 +616,7 @@ class Amasijo(object):
 					age=np.log10(self.isochrones_args["age"]*1.e6), 
 					feh=self.isochrones_args["MIST_args"]["metallicity"], 
 					distance=distance, 
-					AV=self.isochrones_args["MIST_args"]["Av"],
+					AV=avs,
 					return_df=True)
 			#-----------------------------------------------------------------
 		elif self.isochrones_args["model"] == "PARSEC":
@@ -671,13 +679,13 @@ class Amasijo(object):
 				n_stars=n_stars).eval()
 			#----------------------------------------------
 
-			#---------- Apparent photometry -----------
+			#---------- Apparent photometry ---------------------
 			apparent_photometry = absolute_photometry \
 					+ 5.0*np.log10(distance)[:,np.newaxis] - 5.0
-			#-----------------------------------------
+			#----------------------------------------------------
 
 			#--------- Selected bands -----------------------------
-			photometry = apparent_photometry[:,idx_bands]
+			apparent_photometry = apparent_photometry[:,idx_bands]
 			#------------------------------------------------------
 
 			#------------- Data frame ----------------------
@@ -689,8 +697,25 @@ class Amasijo(object):
 			df_abs["Logg"] = logg
 
 			df_apa = pd.DataFrame(
-				data=photometry,
+				data=apparent_photometry,
 				columns=[band+"_mag" for band in requested_bands])
+			#------------------------------------------------------
+
+			#--------------- Redden photometry -------------------------------
+			redden = np.zeros((n_stars,len(requested_bands)))
+			for i in range(n_stars):
+				redden[i] = ccm89(
+				np.array(self.isochrones_args["PARSEC_args"]["bands_wavelengths"]),
+				avs[i],self.isochrones_args["PARSEC_args"]["Rv"])
+			df_red = pd.DataFrame(
+				data=redden,
+				columns=[band for band in requested_bands])
+
+			for band in requested_bands:
+				df_apa[band+"_mag"] += df_red[band]
+			#--------------------------------------------------------------------
+
+			#--------- Join ----------------
 			df_ph = df_apa.join(df_abs)
 			#----------------------------------------------
 
@@ -1437,16 +1462,18 @@ if __name__ == "__main__":
 	isochrones_args = {
 	"model":model,
 	"age": 120.0,# [Myr]
+	"Av_limits":[0.0,5.0],
 	"MIST_args":{
 		"mass_limits":[0.1,2.5],
 		"metallicity":0.012,
-		"Av": 0.0
 		},
 	"PARSEC_args":{
 		"file_mlp_phot":dir_mlps+"Phot_l7_s512/mlp.pkl",
-		"file_mlp_teff":dir_mlps+"Teff_l13_s256/mlp.pkl",
-		"file_mlp_logg":dir_mlps+"Logg_l16_s512/mlp.pkl",
+		"file_mlp_teff":dir_mlps+"Teff_l16_s512/mlp.pkl",
+		"file_mlp_logg":dir_mlps+"Logg_l13_s256/mlp.pkl",
 		"mass_limits":[0.1,4.0],
+		"bands_wavelengths":[6230.0,5050.0,7730.0], # Same order as bands
+		"Rv":3.1
 		},
 	"bands":["G","BP","RP"]
 	}
