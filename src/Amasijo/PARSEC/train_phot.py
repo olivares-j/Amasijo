@@ -10,25 +10,25 @@ from sklearn.preprocessing import MinMaxScaler, PowerTransformer
 from mlp_model import create_custom_model
 
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
-train = True
+train = False
 
 # ------------------------------ Model properties --------------------------------
 max_label = 1
 features = ["age","Mini"]
 targets  = ['Gmag', 'G_BPmag', 'G_RPmag']#, 'gP1mag', 'rP1mag', 'iP1mag','zP1mag','yP1mag','Jmag', 'Hmag', 'Ksmag']
-list_of_num_layers = [1,2,3,4,5,6,7,8,9,10] # Number of hidden layers
-list_of_size_layers = [256]  # Units in each hidden layer
-training_epochs = [9999,9999,9999]
-learning_rates  = [1e-3,1e-4,1e-5]
+list_of_num_layers = [3] # Number of hidden layers
+list_of_size_layers = [700,800,900,1000,1100,1200,1300,1400,1500,1600,1700]  # Units in each hidden layer
+training_epochs = [int(1e4),int(1e4),int(1e4),int(2e4)]
+learning_rates  = [1e-3,1e-4,1e-5,1e-6]
 activation_layers = "relu" # Activation functions for each hidden layer
 output_activation = "linear"  # Activation function for the output layer
 batch_fraction = 1.0
 #--------------------------------------------------------------------------
 
 #--------------- Directories and files ---------------------------------------------
-dir_base  = "/home/jolivares/Models/PARSEC/Gaia_EDR3/100-500Myr/"
+dir_base  = "/home/jolivares/Models/PARSEC/Gaia_EDR3/50-150Myr/"
 # Remove the # from the row contain the header in the input file
 file_iso  = dir_base + "output.dat" 
 dir_mlps  = dir_base + "MLPs/"
@@ -51,16 +51,20 @@ df_iso = pd.read_csv(file_iso,
 df_iso = df_iso.loc[df_iso["label"]<= max_label]
 df_iso["age"] = np.round(np.pow(10.,df_iso["logAge"])/np.pow(10.,6.0),decimals=1)
 df_iso["Teff"] = np.pow(10.,df_iso["logTe"])
+df_iso["Mini"] = np.round(df_iso["Mini"],decimals=3)
 df_iso = df_iso.loc[:,sum([features,targets],[])]
 print(df_iso.describe())
 #----------------------------------------------------
 
-#--------------------------------------------------- Select certain ages -----------------------------------------------------------------
-# df_iso = df_iso.query("age_Myr == [20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,115,120,125,130,135,140,145,150,155,160,165,170,175,180,185,190,195,200]")
-# df_iso = df_iso.query("age_Myr == [20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200]")
-# df_iso = df_iso.query("age_Myr == [20,40,60,80,100,120,140,160,180,200]")
-# df_iso = df_iso.query("age_Myr == [20,200]")
-# print(df_iso.describe())
+#---------------------------------------- Select Masses to have uniform sampling -----------------------------------------------------------------
+# For 50-150 Myr
+# list_of_masses = np.array([0.09,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0,2.2,2.4,2.6,2.8,3.0,3.2,3.4,3.6,3.8,4.0])
+# df_iso = df_iso.query("Mini in @list_of_masses | Mini > 4.0")
+#For 100-500 Myr
+# list_of_masses = np.array([0.09,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0])
+# df_iso = df_iso.query("Mini in @list_of_masses | Mini > 2.0")
+print(df_iso.describe())
+df_iso = df_iso.query("Mini > 4.0")
 #------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 mads = []
@@ -141,7 +145,6 @@ for size_layers in list_of_size_layers:
 					"targets":targets,
 					"age_domain":age_domain,
 					"mass_domain":mass_domain,
-					# "teff_domain":teff_domain
 					}
 
 				with open(file_mlp, "wb") as file:
@@ -167,12 +170,8 @@ for size_layers in list_of_size_layers:
 			ax.set_xlabel("Iteration")
 			ax.set_ylabel("Loss")
 			ax.set_yscale('log')
-			# plt.legend(bbox_to_anchor=(1.01, 0.5), loc="center left")
 			fig.savefig(base_lss.format(dir_case))
 			plt.close()
-
-
-		
 
 		#---------- Instantiate model ---------------------
 		model = create_custom_model(
@@ -211,6 +210,8 @@ for size_layers in list_of_size_layers:
 		#--------- Save for general plot---------------------
 		tmp = pd.DataFrame(data={
 			"MAD":df.loc[:,targets].abs().max().to_numpy().max(),
+			"mean":df.loc[:,"Gmag"].abs().mean(),
+			"std":df.loc[:,"Gmag"].std(),
 			"num_layers":num_layers,
 			"size_layers":size_layers},index=[0])
 		tmp.set_index("num_layers",inplace=True)
@@ -234,9 +235,6 @@ for size_layers in list_of_size_layers:
 		fig.savefig(base_err.format(dir_case))
 		plt.close()
 
-		# df_tst.loc[:,"color"] = df_tst.apply(lambda x: x["Gmag"]-x["G_RPmag"],axis=1)
-		# df_prd.loc[:,"color"] = df_prd.apply(lambda x: x["Gmag"]-x["G_RPmag"],axis=1)
-
 		ax = sns.scatterplot(data=df_tst,
 				x="Mini",
 				y="Gmag",
@@ -257,14 +255,19 @@ for size_layers in list_of_size_layers:
 
 df_mad = pd.concat(mads,ignore_index=False)
 fig, ax = plt.subplots(1, 1, figsize=(16, 8))
-ax = sns.lineplot(data=df_mad,
-					x="num_layers",
-					y="MAD",
-					hue="size_layers",
+ax = sns.scatterplot(data=df_mad,
+					hue="num_layers",
+					y="mean",
+					x="size_layers",
 					zorder=0)
-ax.set_xlabel("Number of layers")
-ax.set_ylabel("MAD of the relative error")
-ax.set_yscale("log")
+ax.errorbar(
+	x=df_mad["size_layers"],
+	y=df_mad["mean"],
+	yerr=df_mad["std"],
+	color='tab:blue',
+	ecolor='tab:grey')
+ax.set_xlabel("Size of layers")
+ax.set_ylabel("Mean error")
 ax.xaxis.set_major_locator(MaxNLocator(integer=True))
 plt.legend(bbox_to_anchor=(1.01, 0.5), loc="center left")
 fig.savefig(file_mad)
