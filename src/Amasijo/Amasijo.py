@@ -618,6 +618,7 @@ class Amasijo(object):
 					distance=distance, 
 					AV=avs,
 					return_df=True)
+			df_ph["Av"] = avs
 			#-----------------------------------------------------------------
 		elif self.isochrones_args["model"] == "PARSEC":
 			
@@ -695,6 +696,7 @@ class Amasijo(object):
 			df_abs["mass"] = mass
 			df_abs["Teff"] = teff
 			df_abs["Logg"] = logg
+			df_abs["Av"]   = avs
 
 			df_apa = pd.DataFrame(
 				data=apparent_photometry,
