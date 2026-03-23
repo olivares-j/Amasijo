@@ -584,6 +584,7 @@ class Amasijo(object):
 
 	def _generate_true_photometry(self,distance):
 		n_stars = len(distance)
+		log_age = np.log10(self.isochrones_args["age"]*1.e6)
 
 		#------------ Extinctions ------------------------------
 		avs = np.random.uniform(
@@ -593,7 +594,7 @@ class Amasijo(object):
 		#--------------------------------------------------
 
 		if self.isochrones_args["model"] == "MIST":
-			assert np.all(self.isochrones_args["MIST_args"]["mass_limits"][0]>= 0.1),\
+			assert np.all(self.isochrones_args["mass_limits"][0]>= 0.1),\
 			"Error: The lower mass allowed by the MIST model is 0.1. Adjust mass_limits!"
 
 			from isochrones import get_ichrone
@@ -605,105 +606,103 @@ class Amasijo(object):
 
 			#------------ Masses ------------------------------
 			masses = np.random.uniform(
-					low=self.isochrones_args["MIST_args"]["mass_limits"][0],
-					high=self.isochrones_args["MIST_args"]["mass_limits"][1],
+					low=self.isochrones_args["mass_limits"][0],
+					high=self.isochrones_args["mass_limits"][1],
 					size=n_stars)
 			#--------------------------------------------------
 
 			#------- Photometry -----------------------------------------
 			df_ph = tracks.generate(
 					mass=masses, 
-					age=np.log10(self.isochrones_args["age"]*1.e6), 
+					age=log_age, 
 					feh=self.isochrones_args["MIST_args"]["metallicity"], 
 					distance=distance, 
 					AV=avs,
 					return_df=True)
 			df_ph["Av"] = avs
+			df_ph["distance"] = distance
 			#-----------------------------------------------------------------
+
 		elif self.isochrones_args["model"] == "PARSEC":
-			
-			from .PARSEC.MLPs import MLP_phot, MLP_teff, MLP_logg
-			
-			mlp_phot = MLP_phot(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_phot"])
-			mlp_teff = MLP_teff(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_teff"])
-			mlp_logg = MLP_logg(file_mlp=self.isochrones_args["PARSEC_args"]["file_mlp_logg"])
 
-			assert (mlp_phot.age_domain == mlp_teff.age_domain) &\
-				(mlp_phot.age_domain == mlp_logg.age_domain),"ERROR:"+\
-				"The age limits of the mlps do not coincide"
+			#------------- Load data ------------------------------------
+			dfs_iso = []
+			for file_iso in self.isochrones_args["PARSEC_args"]["files"]:
+				df_tmp = pd.read_csv(file_iso,
+									skiprows=13,
+									delimiter=r"\s+",
+									header="infer",
+									comment="#")
+				df_tmp.rename(columns={"Mini":"mass"},inplace=True)
+				df_tmp.set_index(
+					["logAge","logL","logTe","logg","mass"],
+					inplace=True)
+				dfs_iso.append(df_tmp)
+			df_iso = pd.concat(dfs_iso,axis=1,ignore_index=False)
+			#------------------------------------------------------------
 
-			assert (mlp_phot.mass_domain == mlp_teff.mass_domain) &\
-				(mlp_phot.mass_domain == mlp_logg.mass_domain),"ERROR:"+\
-				"The mass limits of the mlps do not coincide"
+			#-------------------- Rename columns ------------------------------
+			df_iso.rename(
+					columns={
+					"Gmag":"G_mag",
+					"G_BPmag":"BP_mag",
+					"G_RPmag":"RP_mag"
+					},inplace=True)
+			parsec_bands = [col for col in df_iso.columns if "mag" in col]
+			df_iso.reset_index(inplace=True)
+			df_iso["Teff"] = np.pow(10.,df_iso["logTe"])
+			#------------------------------------------------------------------
 
-			assert (self.isochrones_args["PARSEC_args"]["mass_limits"][0] >= mlp_phot.mass_domain[0]) &\
-				(self.isochrones_args["PARSEC_args"]["mass_limits"][1] <= mlp_phot.mass_domain[1]),"ERROR:"+\
-				"mass_limits outside the PARSEC mlp_phot domain"
+			#----------- Select age ----------------------------------------------------
+			ages = df_iso["logAge"].to_numpy()
+			diff = np.abs(ages-log_age)
+			age  = ages[np.argmin(diff)]
+			df_iso = df_iso.query("logAge == {0}".format(age))
+			msg = "The closest available age differs from requested by more than 10 Myr"
+			age_diff = np.abs(np.pow(10,age)-np.pow(10,log_age))/np.pow(10,6)
+			assert age_diff < 10,msg 
+			print("The closest available age in the input PARSEC file is:")
+			print("{0:3.2f} Myr".format(np.pow(10,age)/np.pow(10,6)))
+			#----------------------------------------------------------------------------
 
-			assert (self.isochrones_args["age"] >= float(mlp_phot.age_domain[0])) &\
-				(self.isochrones_args["age"] <= float(mlp_phot.age_domain[1])),"ERROR:"+\
-				"Input age outside the PARSEC mlp_phot domain"
+			#-------------------- Select masses ----------------------
+			df_iso = df_iso.query("mass >= {0} & mass <= {1}".format(
+				*self.isochrones_args["mass_limits"]))
+			#----------------------------------------------------------
 
-			#---------- Selected bands --------------------------------------------------------------
-			parsec_bands = np.array([band.replace("G_","").replace("mag","") for band in mlp_phot.targets])
-			requested_bands = np.array(self.isochrones_args["bands"])
+			#------------------- Select requested number of stars --------------------------------
+			n_sources = df_iso.shape[0]
+			assert n_sources >= n_stars,"Error: the PARSEC file for the requested age "+\
+			"only has {0} sources! Reduce n_stars or provide a different file".format(n_sources)
+			df_iso = df_iso.sample(n=n_stars)
+			#--------------------------------------------------------------------------------------
 
+			#---------- Verify bands ----------------------------------------------------------
+			requested_bands = np.array([band+"_mag" for band in self.isochrones_args["bands"]])
 			cnd = sum(np.isin(requested_bands,parsec_bands)) == requested_bands.shape[0]
-			msg = "Error: requested bands not present in PARSEC bands:\n"+\
-			"{0}".format(parsec_bands)
+			msg = "Error: requested bands not present in PARSEC files:\n"+\
+			"Requested: {0}.\n".format(requested_bands)+\
+			"Available PARSEC bands: {0}".format(parsec_bands)
 			assert cnd,msg
-			idx_bands = np.where(np.isin(requested_bands,parsec_bands))[0]
-			#-------------------------------------------------------------------------------------------
+			df_iso.set_index(["mass","Teff","logg"],inplace=True)
+			#-----------------------------------------------------------------------------------
 
-			#------------ Mass ------------------------------
-			mass = np.random.uniform(
-				low=self.isochrones_args["PARSEC_args"]["mass_limits"][0],
-				high=self.isochrones_args["PARSEC_args"]["mass_limits"][1],
-				size=n_stars)
-			#--------------------------------------------------
+			#----------- Absolute photometry ---------------------------
+			df_abs = df_iso.loc[:,requested_bands].copy()
+			df_abs.rename(columns=lambda x: "abs_"+x,inplace=True)
+			#-----------------------------------------------------------
+			
+			#-------------- Apparent photometry -----------------------
+			df_apa = df_iso.loc[:,requested_bands].copy()
+			df_apa["distance"] = distance
+			df_apa["Av"] = avs
+			for band in requested_bands:
+				df_apa[band] = df_apa.apply(
+				lambda x: x[band] + 5.0*np.log10(x["distance"]) - 5.0,
+				axis=1)
+			#---------------------------------------------------------
 
-			#-------- Teff & Logg -------------------
-			teff = mlp_teff(
-				age=self.isochrones_args["age"],
-				mass=mass,
-				n_stars=n_stars).eval().flatten()
-			logg = mlp_logg(
-				age=self.isochrones_args["age"],
-				mass=mass,
-				n_stars=n_stars).eval().flatten()
-			#-----------------------------------------
-
-			#------ Absolute photometry ----------
-			absolute_photometry = mlp_phot(
-				age=self.isochrones_args["age"],
-				mass=mass,
-				n_stars=n_stars).eval()
-			#----------------------------------------------
-
-			#---------- Apparent photometry ---------------------
-			apparent_photometry = absolute_photometry \
-					+ 5.0*np.log10(distance)[:,np.newaxis] - 5.0
-			#----------------------------------------------------
-
-			#--------- Selected bands -----------------------------
-			apparent_photometry = apparent_photometry[:,idx_bands]
-			#------------------------------------------------------
-
-			#------------- Data frame ----------------------
-			df_abs = pd.DataFrame(
-				data=absolute_photometry,
-				columns=["abs_"+band for band in mlp_phot.targets])
-			df_abs["mass"] = mass
-			df_abs["Teff"] = teff
-			df_abs["Logg"] = logg
-			df_abs["Av"]   = avs
-
-			df_apa = pd.DataFrame(
-				data=apparent_photometry,
-				columns=[band+"_mag" for band in requested_bands])
-			#------------------------------------------------------
-
-			#--------------- Redden photometry -------------------------------
+			#--------------- Redden photometry -------------------------------------
 			redden = np.zeros((n_stars,len(requested_bands)))
 			for i in range(n_stars):
 				redden[i] = ccm89(
@@ -711,21 +710,20 @@ class Amasijo(object):
 				avs[i],self.isochrones_args["PARSEC_args"]["Rv"])
 			df_red = pd.DataFrame(
 				data=redden,
-				columns=[band for band in requested_bands])
+				index=df_apa.index,
+				columns=requested_bands)
 
 			for band in requested_bands:
-				df_apa[band+"_mag"] += df_red[band]
+				df_apa[band] += df_red[band]
 			#--------------------------------------------------------------------
 
 			#--------- Join ----------------
 			df_ph = df_apa.join(df_abs)
-			#----------------------------------------------
+			df_ph.reset_index(inplace=True)
+			#-------------------------------
 
 		else:
 			sys.exit("ERROR: model currently not supported")
-
-
-		df_ph["distance"] = distance
 
 		assert np.all(np.isfinite(df_ph["G_mag"])),"ERROR: There are missing values in the photometry!"
 
@@ -737,6 +735,8 @@ class Amasijo(object):
 			print("WARNING: The following sources were generated outside the PyGaia limits [4,21]:\n")
 			print(df_ph.loc[bad,["G_mag","mass"]])
 		#--------------------------------------------------------------------
+
+		df_ph.rename(columns={"logg":"Logg"},inplace=True) # Logg with capital is the true value
 
 		return df_ph
 	#======================================================================================
@@ -1441,11 +1441,10 @@ class Amasijo(object):
 if __name__ == "__main__":
 
 	seed      = 0
-	n_stars   = 100
+	n_stars   = 67
 	distance  = 10.0
 	model     = "PARSEC"
 	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Test/"
-	dir_mlps  = "/home/jolivares/Models/PARSEC/Gaia_EDR3/15-400Myr/MLPs/"
 	base_name = "{0}_n{1}_d{2}_s{3}".format(model,n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
@@ -1465,15 +1464,12 @@ if __name__ == "__main__":
 	"model":model,
 	"age": 120.0,# [Myr]
 	"Av_limits":[0.0,5.0],
+	"mass_limits":[0.0,1.85],
 	"MIST_args":{
-		"mass_limits":[0.1,2.5],
 		"metallicity":0.012,
 		},
 	"PARSEC_args":{
-		"file_mlp_phot":dir_mlps+"Phot_l7_s512/mlp.pkl",
-		"file_mlp_teff":dir_mlps+"Teff_l16_s512/mlp.pkl",
-		"file_mlp_logg":dir_mlps+"Logg_l13_s256/mlp.pkl",
-		"mass_limits":[0.1,4.0],
+		"files":["/home/jolivares/Models/PARSEC/Gaia_EDR3/50-150Myr/Kroupa/output_0.1myr.dat"],
 		"bands_wavelengths":[6230.0,5050.0,7730.0], # Same order as bands
 		"Rv":3.1
 		},
