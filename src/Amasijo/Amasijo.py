@@ -12,7 +12,7 @@ from scipy.interpolate import splrep,splev
 from scipy.spatial import distance
 from extinction import ccm89
 
-from functions import AngularSeparation,covariance_parallax,covariance_proper_motion
+from .functions import AngularSeparation,covariance_parallax,covariance_proper_motion
 
 from pygaia.errors.astrometric import parallax_uncertainty,position_uncertainty,proper_motion_uncertainty
 from pygaia.errors.photometric import magnitude_uncertainty
