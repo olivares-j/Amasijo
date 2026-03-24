@@ -12,7 +12,7 @@ from scipy.interpolate import splrep,splev
 from scipy.spatial import distance
 from extinction import ccm89
 
-from .functions import AngularSeparation,covariance_parallax,covariance_proper_motion
+from functions import AngularSeparation,covariance_parallax,covariance_proper_motion
 
 from pygaia.errors.astrometric import parallax_uncertainty,position_uncertainty,proper_motion_uncertainty
 from pygaia.errors.photometric import magnitude_uncertainty
@@ -624,8 +624,9 @@ class Amasijo(object):
 			#-----------------------------------------------------------------
 
 		elif self.isochrones_args["model"] == "PARSEC":
-
-			#------------- Load data ------------------------------------
+			assert (len(self.isochrones_args["PARSEC_args"]["bands_wavelengths"]) ==
+			len(self.isochrones_args["bands"])),"Error: the wavelengths do not match!"
+			#-------------------------- Load data --------------------------------------------------
 			dfs_iso = []
 			for file_iso in self.isochrones_args["PARSEC_args"]["files"]:
 				df_tmp = pd.read_csv(file_iso,
@@ -634,21 +635,33 @@ class Amasijo(object):
 									header="infer",
 									comment="#")
 				df_tmp.rename(columns={"Mini":"mass"},inplace=True)
-				df_tmp.set_index(
+				try:
+					df_tmp.set_index(
 					["logAge","logL","logTe","logg","mass"],
 					inplace=True)
+				except Exception as e:
+					print("ERROR: the input files must have uncommented column names at line 14.")
+					raise e
+				df_tmp = df_tmp.loc[:,[col for col in df_tmp.columns if "mag" in col]]
+				df_tmp.drop(columns="mbolmag",inplace=True)
 				dfs_iso.append(df_tmp)
-			df_iso = pd.concat(dfs_iso,axis=1,ignore_index=False)
-			#------------------------------------------------------------
+			
+			try:
+				df_iso = pd.concat(dfs_iso,axis=1,ignore_index=False)
+			except Exception as e:
+				print("ERROR: the input files must have the same number of rows.")
+				raise e
+			#-------------------------------------------------------------------------------------------
 
 			#-------------------- Rename columns ------------------------------
-			df_iso.rename(
-					columns={
-					"Gmag":"G_mag",
-					"G_BPmag":"BP_mag",
-					"G_RPmag":"RP_mag"
-					},inplace=True)
-			parsec_bands = [col for col in df_iso.columns if "mag" in col]
+			df_iso.rename(columns=lambda x: x.replace("mag","_mag"),
+						inplace=True)
+			df_iso.rename(columns={
+						"G_BP_mag":"BP_mag",
+						"G_RP_mag":"RP_mag"
+						},
+						inplace=True)
+			parsec_bands = df_iso.columns.copy()
 			df_iso.reset_index(inplace=True)
 			df_iso["Teff"] = np.pow(10.,df_iso["logTe"])
 			#------------------------------------------------------------------
@@ -756,6 +769,8 @@ class Amasijo(object):
 
 		assert frac_rvs_obs is None or isinstance(frac_rvs_obs,float),\
 		"Error: fraction_radial_velocities_observed must be float or None"
+		assert (len(self.isochrones_args["bands"])==
+			len(self.isochrones_args["uncertainties"])),"ERROR: uncertainties and bands do not match!"
 
 		N = len(true)
 
@@ -1010,11 +1025,9 @@ class Amasijo(object):
 
 		#--------- Additional (including Gaia) ------------------
 		obs_bands = np.empty_like(true_bands)
-		unc_bands = np.repeat(rp_unc.reshape((-1,1)),
-						obs_bands.shape[1],
-						axis=1)
-		print("WARNING: All isochrone bands will have the same uncertainty as the Gaia_RP band")
-		for i,mu in true_bands.iterrows():
+		unc_bands = np.full(obs_bands.shape,
+			self.isochrones_args["uncertainties"])
+		for i,mu in true_bands.iterrows(): 
 			obs_bands[i] = rng.multivariate_normal(
 					mean=mu,cov=np.diag(unc_bands[i]**2),
 					tol=1e-8,method="cholesky",size=1)
@@ -1441,7 +1454,7 @@ class Amasijo(object):
 if __name__ == "__main__":
 
 	seed      = 0
-	n_stars   = 67
+	n_stars   = 51
 	distance  = 10.0
 	model     = "PARSEC"
 	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Test/"
@@ -1464,16 +1477,20 @@ if __name__ == "__main__":
 	"model":model,
 	"age": 120.0,# [Myr]
 	"Av_limits":[0.0,5.0],
-	"mass_limits":[0.0,1.85],
+	"mass_limits":[0.0,1.54],
 	"MIST_args":{
 		"metallicity":0.012,
 		},
 	"PARSEC_args":{
-		"files":["/home/jolivares/Models/PARSEC/Gaia_EDR3/50-150Myr/Kroupa/output_0.1myr.dat"],
-		"bands_wavelengths":[6230.0,5050.0,7730.0], # Same order as bands
+		"files":[
+		"/home/jolivares/Models/PARSEC/Gaia_EDR3/50-150Myr/Kroupa/output_1myr.dat",
+		"/home/jolivares/Models/PARSEC/2MASS/50-150Myr/Kroupa/output_1myr.dat",
+		],
+		"bands_wavelengths":[6217.6,5109.7,7769.0,12350.,16620.,21590.], # Same order as bands
 		"Rv":3.1
 		},
-	"bands":["G","BP","RP"]
+	"bands":["G","BP","RP","J","H","Ks"],
+	"uncertainties":[0.001,0.02,0.004,0.025,0.030,0.025]
 	}
 
 	mcluster_args = {
