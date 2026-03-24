@@ -637,7 +637,7 @@ class Amasijo(object):
 				df_tmp.rename(columns={"Mini":"mass"},inplace=True)
 				try:
 					df_tmp.set_index(
-					["logAge","logL","logTe","logg","mass"],
+					["logAge","logL","logTe","logg","mass","label"],
 					inplace=True)
 				except Exception as e:
 					print("ERROR: the input files must have uncommented column names at line 14.")
@@ -678,6 +678,11 @@ class Amasijo(object):
 			print("{0:3.2f} Myr".format(np.pow(10,age)/np.pow(10,6)))
 			#----------------------------------------------------------------------------
 
+			#------------- Select label (evolutionary stage) ----------
+			df_iso = df_iso.query("label <= {0}".format(
+				self.isochrones_args["PARSEC_args"]["max_label"]))
+			#----------------------------------------------------------
+
 			#-------------------- Select masses ----------------------
 			df_iso = df_iso.query("mass >= {0} & mass <= {1}".format(
 				*self.isochrones_args["mass_limits"]))
@@ -697,7 +702,7 @@ class Amasijo(object):
 			"Requested: {0}.\n".format(requested_bands)+\
 			"Available PARSEC bands: {0}".format(parsec_bands)
 			assert cnd,msg
-			df_iso.set_index(["mass","Teff","logg"],inplace=True)
+			df_iso.set_index(["mass","Teff","logg","label"],inplace=True)
 			#-----------------------------------------------------------------------------------
 
 			#----------- Absolute photometry ---------------------------
@@ -1477,7 +1482,7 @@ if __name__ == "__main__":
 	"model":model,
 	"age": 120.0,# [Myr]
 	"Av_limits":[0.0,5.0],
-	"mass_limits":[0.0,1.54],
+	"mass_limits":[0.0,1.95],
 	"MIST_args":{
 		"metallicity":0.012,
 		},
@@ -1486,6 +1491,7 @@ if __name__ == "__main__":
 		"/home/jolivares/Models/PARSEC/Gaia_EDR3/50-150Myr/Kroupa/output_1myr.dat",
 		"/home/jolivares/Models/PARSEC/2MASS/50-150Myr/Kroupa/output_1myr.dat",
 		],
+		"max_label":1,
 		"bands_wavelengths":[6217.6,5109.7,7769.0,12350.,16620.,21590.], # Same order as bands
 		"Rv":3.1
 		},
