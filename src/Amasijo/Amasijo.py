@@ -97,7 +97,7 @@ class Amasijo(object):
 		
 
 		#------- Labels ----------------------------------------------------------------------------------
-		self.labels_phase_space = ["X","Y","Z","U","V","W"]
+		self.labels_phase_space = phasespace_args["coordinates"]
 		self.labels_true_as = ["ra_true","dec_true","parallax_true",
 								"pmra_true","pmdec_true","radial_velocity_true"]
 		self.labels_true_bands = [band+"_mag" for band in isochrones_args["bands"]]
@@ -1220,7 +1220,11 @@ class Amasijo(object):
 		pdf = PdfPages(filename=file_plot)
 
 		#----------------- X Y Z -----------------------------
-		coords = { 2:["X","Z"], 3:["Z","Y"], 4:["X","Y"]}
+		coords = {
+		2:[self.labels_phase_space[0],self.labels_phase_space[2]], 
+		3:[self.labels_phase_space[2],self.labels_phase_space[1]], 
+		4:[self.labels_phase_space[0],self.labels_phase_space[1]]
+		}
 
 		fig = plt.figure(figsize=figsize)
 		count = 2
@@ -1243,13 +1247,16 @@ class Amasijo(object):
 
 
 		ax = fig.add_subplot(2, 2, 1, projection='3d')
-		ax.scatter(self.df["X"], self.df["Y"], self.df["Z"], 
-								s=cases["true"]["ms"], 
-								color=cases["true"]["color"],
-								label=cases["true"]["label"])
-		ax.set_xlabel("X [pc]")
-		ax.set_ylabel("Y [pc]")
-		ax.set_zlabel("Z [pc]")
+		ax.scatter(
+			self.df[self.labels_phase_space[0]], 
+			self.df[self.labels_phase_space[1]], 
+			self.df[self.labels_phase_space[2]], 
+			s=cases["true"]["ms"], 
+			color=cases["true"]["color"],
+			label=cases["true"]["label"])
+		ax.set_xlabel("{0} [pc]".format(self.labels_phase_space[0]))
+		ax.set_ylabel("{0} [pc]".format(self.labels_phase_space[1]))
+		ax.set_zlabel("{0} [pc]".format(self.labels_phase_space[2]))
 		# View point
 		ax.view_init(25,-135)
 		# Avoids crowded ticks 
@@ -1261,7 +1268,11 @@ class Amasijo(object):
 		#-----------------------------------------------------
 
 		#----------------- U V W -----------------------------
-		coords = { 2:["U","W"], 3:["W","V"], 4:["U","V"]}
+		coords = {
+		2:[self.labels_phase_space[3],self.labels_phase_space[5]], 
+		3:[self.labels_phase_space[5],self.labels_phase_space[4]], 
+		4:[self.labels_phase_space[3],self.labels_phase_space[4]]
+		}
 
 		fig = plt.figure(figsize=figsize)
 		count = 2
@@ -1284,13 +1295,16 @@ class Amasijo(object):
 
 
 		ax = fig.add_subplot(2, 2, 1, projection='3d')
-		ax.scatter(self.df["U"], self.df["V"], self.df["W"], 
-								s=cases["true"]["ms"], 
-								color=cases["true"]["color"],
-								label=cases["true"]["label"])
-		ax.set_xlabel("U [km/s]")
-		ax.set_ylabel("V [km/s]")
-		ax.set_zlabel("W [km/s]")
+		ax.scatter(
+				self.df[self.labels_phase_space[3]],
+				self.df[self.labels_phase_space[4]],
+				self.df[self.labels_phase_space[5]], 
+				s=cases["true"]["ms"], 
+				color=cases["true"]["color"],
+				label=cases["true"]["label"])
+		ax.set_xlabel("{0} [km/s]".format(self.labels_phase_space[3]))
+		ax.set_ylabel("{0} [km/s]".format(self.labels_phase_space[4]))
+		ax.set_zlabel("{0} [km/s]".format(self.labels_phase_space[5]))
 		# View point
 		ax.view_init(25,-135)
 		# Avoids crowded ticks 
@@ -1461,13 +1475,14 @@ if __name__ == "__main__":
 	seed      = 0
 	n_stars   = 51
 	distance  = 10.0
-	model     = "PARSEC"
+	model     = "MIST"
 	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Test/"
 	base_name = "{0}_n{1}_d{2}_s{3}".format(model,n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
 	file_data = dir_main + base_name + ".csv"
 	
 	phasespace_args = {
+		"coordinates":["X_gal","Y_gal","Z_gal","U_gal","V_gal","W_gal"],
 		"position":{"family":"Gaussian",
 					"location":np.array([distance,0.0,0.0]),
 					"covariance":np.diag([9.,9.,9.])},
@@ -1482,7 +1497,7 @@ if __name__ == "__main__":
 	"model":model,
 	"age": 120.0,# [Myr]
 	"Av_limits":[0.0,5.0],
-	"mass_limits":[0.0,1.95],
+	"mass_limits":[0.1,1.95],
 	"MIST_args":{
 		"metallicity":0.012,
 		},
@@ -1495,8 +1510,10 @@ if __name__ == "__main__":
 		"bands_wavelengths":[6217.6,5109.7,7769.0,12350.,16620.,21590.], # Same order as bands
 		"Rv":3.1
 		},
-	"bands":["G","BP","RP","J","H","Ks"],
-	"uncertainties":[0.001,0.02,0.004,0.025,0.030,0.025]
+	# "bands":["G","BP","RP","J","H","Ks"],
+	# "uncertainties":[0.001,0.02,0.004,0.025,0.030,0.025]
+	"bands":["V","I","G","BP","RP"],
+	"uncertainties":[0.02,0.02,0.001,0.02,0.005]
 	}
 
 	mcluster_args = {
@@ -1512,6 +1529,7 @@ if __name__ == "__main__":
 				# mcluster_args=mcluster_args,
 				# kalkayotl_args={"file":kalkayotl_file},
 				isochrones_args=isochrones_args,
+				reference_system="Galactic",
 				seed=seed)
 	ama.generate_cluster(file_data,n_stars=n_stars,angular_correlations=None)
 	ama.plot_cluster(file_plot=file_plot)
