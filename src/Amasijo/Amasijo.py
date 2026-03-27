@@ -97,7 +97,7 @@ class Amasijo(object):
 		
 
 		#------- Labels ----------------------------------------------------------------------------------
-		self.labels_phase_space = phasespace_args["coordinates"]
+		self.labels_phase_space = self.phasespace_args["coordinates"]
 		self.labels_true_as = ["ra_true","dec_true","parallax_true",
 								"pmra_true","pmdec_true","radial_velocity_true"]
 		self.labels_true_bands = [band+"_mag" for band in isochrones_args["bands"]]
@@ -359,6 +359,7 @@ class Amasijo(object):
 						"covariance":cov}
 					}
 			#==========================================================================
+		phasespace_args["coordinates"] =["X","Y","Z","U","V","W"]
 		return phasespace_args
 
 	#====================== Generate Astrometric Data ==================================================
