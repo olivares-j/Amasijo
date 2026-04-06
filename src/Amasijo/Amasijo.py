@@ -1207,7 +1207,12 @@ class Amasijo(object):
 		df.rename(columns=self.mapper,inplace=True)
 
 		#----------- Save data frame ----------------------------
-		df.to_csv(path_or_buf=file,index_label=index_label)
+		if ".csv" in file:
+			df.to_csv(path_or_buf=file,index_label=index_label)
+		elif ".h5" in file:
+			df.to_hdf(path_or_buf=file,key="amasijo")
+		else:
+			sys.exit("Unrecognized file type")
 
 
 	#=========================Plot =====================================================
