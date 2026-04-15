@@ -635,7 +635,7 @@ class Amasijo(object):
 									delimiter=r"\s+",
 									header="infer",
 									comment="#")
-				df_tmp.rename(columns={"Mini":"mass"},inplace=True)
+				df_tmp.rename(columns={"Mass":"mass"},inplace=True)
 				try:
 					df_tmp.set_index(
 					["logAge","logL","logTe","logg","mass","label"],
@@ -703,7 +703,7 @@ class Amasijo(object):
 			"Requested: {0}.\n".format(requested_bands)+\
 			"Available PARSEC bands: {0}".format(parsec_bands)
 			assert cnd,msg
-			df_iso.set_index(["mass","Teff","logg","label"],inplace=True)
+			df_iso.set_index(["logL","logg","mass","Teff","label"],inplace=True)
 			#-----------------------------------------------------------------------------------
 
 			#----------- Absolute photometry ---------------------------
