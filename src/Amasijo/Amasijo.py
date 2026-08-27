@@ -630,18 +630,21 @@ class Amasijo(object):
 			#-------------------------- Load data --------------------------------------------------
 			dfs_iso = []
 			for file_iso in self.isochrones_args["PARSEC_args"]["files"]:
-				df_tmp = pd.read_csv(file_iso,
-									skiprows=13,
-									delimiter=r"\s+",
-									header="infer",
-									comment="#")
+				if ".dat" in file_iso:
+					df_tmp = pd.read_csv(file_iso,
+										delimiter=r"\s+",
+										header="infer",
+										comment="#")
+				else:
+					df_tmp = pd.read_csv(file_iso)
+
 				df_tmp.rename(columns={"Mass":"mass"},inplace=True)
 				try:
 					df_tmp.set_index(
 					["logAge","logL","logTe","logg","mass","label"],
 					inplace=True)
 				except Exception as e:
-					print("ERROR: the input files must have uncommented column names at line 14.")
+					print("ERROR: the input files must have uncommented column names.")
 					raise e
 				df_tmp = df_tmp.loc[:,[col for col in df_tmp.columns if "mag" in col]]
 				df_tmp.drop(columns="mbolmag",inplace=True)
@@ -1513,8 +1516,7 @@ if __name__ == "__main__":
 		},
 	"PARSEC_args":{
 		"files":[
-		"/home/jolivares/Models/PARSEC/50-150Myr/Kroupa/Gaia_EDR3_1myr.dat",
-		"/home/jolivares/Models/PARSEC/50-150Myr/Kroupa/2MASS_1myr.dat",
+		"/home/jolivares/Models/PARSEC/20-220Myr/Gaia_EDR3+2MASS_0.1myr_no-turn.csv"
 		],
 		"max_label":1,
 		"bands_wavelengths":[6217.6,5109.7,7769.0,12350.,16620.,21590.], # Same order as bands
