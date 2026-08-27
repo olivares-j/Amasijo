@@ -855,17 +855,21 @@ class Amasijo(object):
 			(true_ph["RP_mag"] > 4.0) & 
 			(true_ph["RP_mag"] < 21.0))[0]
 
-		g_unc[idx_g]   = magnitude_uncertainty(band="g",
-								maglist=true_ph["G_mag"][idx_g],
-								release=self.release) # In mmag
+		g_unc[idx_g]   = np.sqrt(magnitude_uncertainty(band="g",
+							maglist=true_ph["G_mag"][idx_g],
+							release=self.release)**2 + # In mmag
+							+ 2.7553202**2)
 
-		bp_unc[idx_bp]  = magnitude_uncertainty(band="bp",
+		bp_unc[idx_bp]  = np.sqrt(magnitude_uncertainty(band="bp",
 							maglist=true_ph["BP_mag"][idx_bp],
-							release=self.release) # In mmag
+							release=self.release)**2 + # In mmag
+							+ 2.7901700**2)
 
-		rp_unc[idx_rp]  = magnitude_uncertainty(band="rp",
+		rp_unc[idx_rp]  = np.sqrt(magnitude_uncertainty(band="rp",
 							maglist=true_ph["RP_mag"][idx_rp], 
-							release=self.release) # In mmag
+							release=self.release)**2 + # In mmag
+							+ 3.7793818**2)
+
 		del true_grvs
 		#---------------------------------------------------------------------------------------------
 
@@ -1479,9 +1483,9 @@ class Amasijo(object):
 if __name__ == "__main__":
 
 	seed      = 0
-	n_stars   = 51
-	distance  = 10.0
-	model     = "MIST"
+	n_stars   = 58
+	distance  = 136.0
+	model     = "PARSEC"
 	dir_main  = "/home/jolivares/Repos/Amasijo/Validation/Test/"
 	base_name = "{0}_n{1}_d{2}_s{3}".format(model,n_stars,int(distance),seed)
 	file_plot = dir_main + base_name + ".pdf"
@@ -1502,24 +1506,24 @@ if __name__ == "__main__":
 	isochrones_args = {
 	"model":model,
 	"age": 120.0,# [Myr]
-	"Av_limits":[0.0,5.0],
+	"Av_limits":[0.0,0.0],
 	"mass_limits":[0.1,1.95],
 	"MIST_args":{
 		"metallicity":0.012,
 		},
 	"PARSEC_args":{
 		"files":[
-		"/home/jolivares/Models/PARSEC/Gaia_EDR3/50-150Myr/Kroupa/output_1myr.dat",
-		"/home/jolivares/Models/PARSEC/2MASS/50-150Myr/Kroupa/output_1myr.dat",
+		"/home/jolivares/Models/PARSEC/50-150Myr/Kroupa/Gaia_EDR3_1myr.dat",
+		"/home/jolivares/Models/PARSEC/50-150Myr/Kroupa/2MASS_1myr.dat",
 		],
 		"max_label":1,
 		"bands_wavelengths":[6217.6,5109.7,7769.0,12350.,16620.,21590.], # Same order as bands
 		"Rv":3.1
 		},
-	# "bands":["G","BP","RP","J","H","Ks"],
-	# "uncertainties":[0.001,0.02,0.004,0.025,0.030,0.025]
-	"bands":["V","I","G","BP","RP"],
-	"uncertainties":[0.02,0.02,0.001,0.02,0.005]
+	"bands":["G","BP","RP","J","H","Ks"],
+	"uncertainties":[0.001,0.02,0.004,0.025,0.030,0.025]
+	# "bands":["V","I","G","BP","RP"],
+	# "uncertainties":[0.02,0.02,0.001,0.02,0.005]
 	}
 
 	mcluster_args = {
