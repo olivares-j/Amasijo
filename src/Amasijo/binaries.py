@@ -285,7 +285,7 @@ def combine_photometry(
     primary,
     secondary,
     q,
-    bands=("G", "BP", "RP"),
+    bands=None,
     suffix="_mag",
 ):
     """
