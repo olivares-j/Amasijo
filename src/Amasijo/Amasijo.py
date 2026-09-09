@@ -12,8 +12,8 @@ from scipy.interpolate import splrep,splev
 from scipy.spatial import distance
 from extinction import ccm89
 
-from .functions import AngularSeparation,covariance_parallax,covariance_proper_motion
-from .binaries import generate_mass_ratios, combine_photometry
+from functions import AngularSeparation,covariance_parallax,covariance_proper_motion
+from binaries import generate_mass_ratios, combine_photometry
 
 from pygaia.errors.astrometric import parallax_uncertainty,position_uncertainty,proper_motion_uncertainty
 from pygaia.errors.photometric import magnitude_uncertainty
@@ -28,8 +28,8 @@ class Amasijo(object):
 	"""This class intends to construct synthetic clusters with simple 
 		phase-space distributions and photometry from stellar models"""
 	def __init__(self,isochrones_args,
-					binary_args=None,
 					phasespace_args=None,
+					binary_args=None,
 					mcluster_args=None,
 					kalkayotl_args={
 						"file":None,
@@ -99,8 +99,9 @@ class Amasijo(object):
 
 		if self.binary_args["enabled"]:
 
-			assert self.isochrones_args["model"] == "MIST", \
-				"Binary systems are currently supported only with the MIST model."
+			if self.binary_args["enabled"]:
+			    assert self.isochrones_args["model"] in ["MIST", "PARSEC"], \
+					"Binary systems are currently supported only with the MIST and PARSEC models."
 
 			assert 0.0 <= self.binary_args["binary_fraction"] <= 1.0, \
 				"binary_fraction must be between 0 and 1."
@@ -892,62 +893,296 @@ class Amasijo(object):
 				self.isochrones_args["PARSEC_args"]["max_label"]))
 			#----------------------------------------------------------
 
+			# #-------------------- Select masses ----------------------
+			# df_iso = df_iso.query("mass >= {0} & mass <= {1}".format(
+			# 	*self.isochrones_args["mass_limits"]))
+			# #----------------------------------------------------------
+
+			# #------------------- Select requested number of stars --------------------------------
+			# n_sources = df_iso.shape[0]
+			# assert n_sources >= n_stars,"Error: the PARSEC file for the requested age "+\
+			# "only has {0} sources! Reduce n_stars or provide a different file".format(n_sources)
+			# df_iso = df_iso.sample(n=n_stars)
+			# #--------------------------------------------------------------------------------------
+
+			# #---------- Verify bands ----------------------------------------------------------
+			# requested_bands = np.array([band+"_mag" for band in self.isochrones_args["bands"]])
+			# cnd = sum(np.isin(requested_bands,parsec_bands)) == requested_bands.shape[0]
+			# msg = "Error: requested bands not present in PARSEC files:\n"+\
+			# "Requested: {0}.\n".format(requested_bands)+\
+			# "Available PARSEC bands: {0}".format(parsec_bands)
+			# assert cnd,msg
+			# df_iso.set_index(["logL","logg","mass","Teff","label"],inplace=True)
+			# #-----------------------------------------------------------------------------------
+
+			# #----------- Absolute photometry ---------------------------
+			# df_abs = df_iso.loc[:,requested_bands].copy()
+			# df_abs.rename(columns=lambda x: "abs_"+x,inplace=True)
+			# #-----------------------------------------------------------
+			
+			# #-------------- Apparent photometry -----------------------
+			# df_apa = df_iso.loc[:,requested_bands].copy()
+			# df_apa["distance"] = distance
+			# df_apa["Av"] = avs
+			# for band in requested_bands:
+			# 	df_apa[band] = df_apa.apply(
+			# 	lambda x: x[band] + 5.0*np.log10(x["distance"]) - 5.0,
+			# 	axis=1)
+			# #---------------------------------------------------------
+
+			# #--------------- Redden photometry -------------------------------------
+			# redden = np.zeros((n_stars,len(requested_bands)))
+			# for i in range(n_stars):
+			# 	redden[i] = ccm89(
+			# 	np.array(self.isochrones_args["PARSEC_args"]["bands_wavelengths"]),
+			# 	avs[i],self.isochrones_args["PARSEC_args"]["Rv"])
+			# df_red = pd.DataFrame(
+			# 	data=redden,
+			# 	index=df_apa.index,
+			# 	columns=requested_bands)
+
+			# for band in requested_bands:
+			# 	df_apa[band] += df_red[band]
+			# #--------------------------------------------------------------------
+
+			# #--------- Join ----------------
+			# df_ph = df_apa.join(df_abs)
+			# df_ph.reset_index(inplace=True)
+			# #-------------------------------
+
 			#-------------------- Select masses ----------------------
-			df_iso = df_iso.query("mass >= {0} & mass <= {1}".format(
-				*self.isochrones_args["mass_limits"]))
+			df_iso_full = df_iso.query(
+				"mass >= {0} & mass <= {1}".format(
+					*self.isochrones_args["mass_limits"])
+			).copy()
 			#----------------------------------------------------------
 
-			#------------------- Select requested number of stars --------------------------------
-			n_sources = df_iso.shape[0]
-			assert n_sources >= n_stars,"Error: the PARSEC file for the requested age "+\
-			"only has {0} sources! Reduce n_stars or provide a different file".format(n_sources)
-			df_iso = df_iso.sample(n=n_stars)
-			#--------------------------------------------------------------------------------------
+			#------------------- Select requested number of stars ----------------
+			n_sources = df_iso_full.shape[0]
+			assert n_sources >= n_stars, \
+				"Error: the PARSEC file for the requested age " + \
+				"only has {0} sources! Reduce n_stars or provide a different file".format(
+					n_sources)
+
+			# Sample the primary component of every stellar system.
+			df_primary = df_iso_full.sample(
+				n=n_stars,
+				random_state=self.random_state
+			).copy()
+			#---------------------------------------------------------------------
 
 			#---------- Verify bands ----------------------------------------------------------
-			requested_bands = np.array([band+"_mag" for band in self.isochrones_args["bands"]])
-			cnd = sum(np.isin(requested_bands,parsec_bands)) == requested_bands.shape[0]
-			msg = "Error: requested bands not present in PARSEC files:\n"+\
-			"Requested: {0}.\n".format(requested_bands)+\
-			"Available PARSEC bands: {0}".format(parsec_bands)
-			assert cnd,msg
-			df_iso.set_index(["logL","logg","mass","Teff","label"],inplace=True)
-			#-----------------------------------------------------------------------------------
+			requested_bands = np.array(
+				[band+"_mag" for band in self.isochrones_args["bands"]]
+			)
 
-			#----------- Absolute photometry ---------------------------
-			df_abs = df_iso.loc[:,requested_bands].copy()
-			df_abs.rename(columns=lambda x: "abs_"+x,inplace=True)
-			#-----------------------------------------------------------
-			
-			#-------------- Apparent photometry -----------------------
-			df_apa = df_iso.loc[:,requested_bands].copy()
-			df_apa["distance"] = distance
-			df_apa["Av"] = avs
+			cnd = sum(
+				np.isin(requested_bands, parsec_bands)
+			) == requested_bands.shape[0]
+
+			msg = "Error: requested bands not present in PARSEC files:\n" + \
+				"Requested: {0}.\n".format(requested_bands) + \
+				"Available PARSEC bands: {0}".format(parsec_bands)
+
+			assert cnd, msg
+			#---------------------------------------------------------------------------------
+
+			#==========================================================================
+			# Primary masses
+			#==========================================================================
+			primary_masses = df_primary["mass"].to_numpy()
+
+			#==========================================================================
+			# Generate mass ratios
+			#
+			# q = 0 -> single-star system
+			# q > 0 -> unresolved binary system
+			#==========================================================================
+			q_requested = generate_mass_ratios(
+				n_stars=n_stars,
+				binary_fraction=self.binary_args["binary_fraction"]
+				if self.binary_args["enabled"] else 0.0,
+				q_distribution=self.binary_args["q_distribution"],
+				q_limits=self.binary_args["q_limits"],
+				random_state=self.random_state
+			)
+
+			is_binary = q_requested > 0.0
+
+			# Target secondary masses.
+			secondary_masses_target = q_requested * primary_masses
+
+			#==========================================================================
+			# Select secondary PARSEC models
+			#
+			# PARSEC does not interpolate masses. Therefore, for each binary,
+			# select the available PARSEC point whose mass is closest to
+			#
+			#     M2_target = q * M1
+			#
+			# q = 0 systems do not require a secondary model.
+			#==========================================================================
+			df_secondary = df_primary.copy()
+
+			mass_secondary = np.full(
+				n_stars,
+				np.nan,
+				dtype=float
+			)
+
+			parsec_masses = df_iso_full["mass"].to_numpy()
+
+			if np.any(is_binary):
+
+				idx_binary = np.where(is_binary)[0]
+
+				for idx in idx_binary:
+
+					target_mass = secondary_masses_target[idx]
+
+					# Find the closest available PARSEC mass.
+					idx_secondary = np.argmin(
+						np.abs(parsec_masses - target_mass)
+					)
+
+					df_secondary.iloc[idx] = (
+						df_iso_full.iloc[idx_secondary].to_numpy()
+					)
+
+					mass_secondary[idx] = parsec_masses[idx_secondary]
+
+			#==========================================================================
+			# Actual mass ratio
+			#
+			# For PARSEC, the actual secondary mass can differ slightly from
+			# q * M1 because the model provides a discrete mass grid.
+			#==========================================================================
+			q_actual = q_requested.copy()
+
+			q_actual[is_binary] = (
+				mass_secondary[is_binary] /
+				primary_masses[is_binary]
+			)
+
+			#==========================================================================
+			# Convert indexed DataFrames back to a convenient representation
+			#==========================================================================
+			df_primary.reset_index(inplace=True)
+			df_secondary.reset_index(inplace=True)
+
+			#==========================================================================
+			# Absolute photometry
+			#
+			# Keep the primary absolute magnitudes for backward compatibility.
+			#==========================================================================
+			df_abs = df_primary.loc[:, requested_bands].copy()
+			df_abs.rename(
+				columns=lambda x: "abs_" + x,
+				inplace=True
+			)
+
+			#==========================================================================
+			# Apparent photometry of primary and secondary
+			#
+			# Distance and extinction are common to both components.
+			# We therefore first calculate the apparent magnitudes of each
+			# component and then combine their fluxes.
+			#==========================================================================
+			df_apa_primary = df_primary.loc[:, requested_bands].copy()
+			df_apa_secondary = df_secondary.loc[:, requested_bands].copy()
+
 			for band in requested_bands:
-				df_apa[band] = df_apa.apply(
-				lambda x: x[band] + 5.0*np.log10(x["distance"]) - 5.0,
-				axis=1)
-			#---------------------------------------------------------
 
-			#--------------- Redden photometry -------------------------------------
-			redden = np.zeros((n_stars,len(requested_bands)))
+				# Distance modulus
+				dm = 5.0 * np.log10(distance) - 5.0
+
+				df_apa_primary[band] += dm
+				df_apa_secondary[band] += dm
+
+			#==========================================================================
+			# Reddening
+			#==========================================================================
+			redden = np.zeros(
+				(n_stars, len(requested_bands))
+			)
+
 			for i in range(n_stars):
+
 				redden[i] = ccm89(
-				np.array(self.isochrones_args["PARSEC_args"]["bands_wavelengths"]),
-				avs[i],self.isochrones_args["PARSEC_args"]["Rv"])
+					np.array(
+						self.isochrones_args["PARSEC_args"]
+						["bands_wavelengths"]
+					),
+					avs[i],
+					self.isochrones_args["PARSEC_args"]["Rv"]
+				)
+
 			df_red = pd.DataFrame(
 				data=redden,
-				index=df_apa.index,
-				columns=requested_bands)
+				columns=requested_bands
+			)
 
 			for band in requested_bands:
-				df_apa[band] += df_red[band]
-			#--------------------------------------------------------------------
 
-			#--------- Join ----------------
-			df_ph = df_apa.join(df_abs)
-			df_ph.reset_index(inplace=True)
-			#-------------------------------
+				df_apa_primary[band] += df_red[band].to_numpy()
+				df_apa_secondary[band] += df_red[band].to_numpy()
+
+			#==========================================================================
+			# Combine unresolved photometry
+			#
+			# q = 0:
+			#     secondary contributes zero flux and the primary is unchanged.
+			#
+			# q > 0:
+			#     primary and secondary fluxes are added.
+			#==========================================================================
+			df_ph = combine_photometry(
+				primary=df_apa_primary,
+				secondary=df_apa_secondary,
+				q=q_requested,
+				bands=self.isochrones_args["bands"]
+			)
+
+			#==========================================================================
+			# Add absolute magnitudes of the primary.
+			#==========================================================================
+			df_ph = df_ph.join(df_abs)
+
+			#==========================================================================
+			# Add stellar parameters of the primary.
+			#
+			# Teff, logg, logL and label are properties of the primary.
+			# For an unresolved binary there is no unique Teff/logg obtained
+			# by simply combining the two component fluxes.
+			#==========================================================================
+			for column in ["logL", "logg", "Teff", "label"]:
+
+				if column in df_primary.columns:
+					df_ph[column] = df_primary[column].to_numpy()
+
+			#==========================================================================
+			# System-level quantities
+			#==========================================================================
+			df_ph["mass"] = primary_masses
+
+			df_ph["mass_secondary"] = mass_secondary
+
+			# Actual q, after mapping the requested secondary mass onto the
+			# discrete PARSEC mass grid.
+			df_ph["mass_ratio"] = q_actual
+
+			# Requested q, useful for quantifying the discretization error.
+			df_ph["mass_ratio_requested"] = q_requested
+
+			df_ph["is_binary"] = is_binary
+
+			df_ph["Av"] = avs
+			df_ph["distance"] = distance
+
+			#==========================================================================
+			# Keep the original ordering of the columns as much as possible.
+			#==========================================================================
+			df_ph.reset_index(drop=True, inplace=True)
 
 		else:
 			sys.exit("ERROR: model currently not supported")
@@ -1711,6 +1946,12 @@ if __name__ == "__main__":
 					"kappa":np.ones(3),
 					"omega":np.array([[-1,-1,-1],[1,1,1]])
 					}}
+	binary_args = {
+				"enabled": True,
+				"binary_fraction": 0.0,
+				"q_distribution": "uniform",
+				"q_limits": (0.1, 1.0),
+				}
 
 	isochrones_args = {
 	"model":model,
@@ -1747,6 +1988,7 @@ if __name__ == "__main__":
 				# mcluster_args=mcluster_args,
 				# kalkayotl_args={"file":kalkayotl_file},
 				isochrones_args=isochrones_args,
+				binary_args= binary_args,
 				reference_system="Galactic",
 				seed=seed)
 	ama.generate_cluster(file_data,n_stars=n_stars,angular_correlations=None)
