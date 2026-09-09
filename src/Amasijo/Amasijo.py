@@ -12,8 +12,8 @@ from scipy.interpolate import splrep,splev
 from scipy.spatial import distance
 from extinction import ccm89
 
-from .functions import AngularSeparation,covariance_parallax,covariance_proper_motion
-from .binaries import generate_mass_ratios, combine_photometry
+from functions import AngularSeparation,covariance_parallax,covariance_proper_motion
+from binaries import generate_mass_ratios, combine_photometry
 
 from pygaia.errors.astrometric import parallax_uncertainty,position_uncertainty,proper_motion_uncertainty
 from pygaia.errors.photometric import magnitude_uncertainty
@@ -1948,7 +1948,7 @@ if __name__ == "__main__":
 					}}
 	binary_args = {
 				"enabled": True,
-				"binary_fraction": 0.0,
+				"binary_fraction": 0.5,
 				"q_distribution": "uniform",
 				"q_limits": (0.1, 1.0),
 				}
