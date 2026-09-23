@@ -87,7 +87,6 @@ class Amasijo(object):
 		if binary_args is None:
 			binary_args = {
 				"enabled": False,
-				"binary_fraction": 0.0,
 				"q_distribution": "uniform",
 				"q_limits": (0.1, 1.0),
 				}
@@ -99,12 +98,8 @@ class Amasijo(object):
 
 		if self.binary_args["enabled"]:
 
-			if self.binary_args["enabled"]:
-			    assert self.isochrones_args["model"] in ["MIST", "PARSEC"], \
-					"Binary systems are currently supported only with the MIST and PARSEC models."
-
-			assert 0.0 <= self.binary_args["binary_fraction"] <= 1.0, \
-				"binary_fraction must be between 0 and 1."
+			assert self.isochrones_args["model"] in ["MIST", "PARSEC"], \
+				"Binary systems are currently supported only with the MIST and PARSEC models."
 
 			qmin, qmax = self.binary_args["q_limits"]
 
@@ -626,209 +621,178 @@ class Amasijo(object):
 		#--------------------------------------------------
 
 		if self.isochrones_args["model"] == "MIST":
-			# assert np.all(self.isochrones_args["mass_limits"][0]>= 0.1),\
-			# "Error: The lower mass allowed by the MIST model is 0.1. Adjust mass_limits!"
+			# ------------------------------------------------------------------
+			# MIST isochrones are only valid down to 0.1 Msun.
+			# ------------------------------------------------------------------
+			assert self.isochrones_args["mass_limits"][0] >= 0.1, \
+			    "Error: The lower mass allowed by the MIST model is 0.1. Adjust mass_limits!"
 
-			# from isochrones import get_ichrone
+			from isochrones import get_ichrone
 
-			# #--------------- Tracks ----------------------------
-			# tracks = get_ichrone('mist', tracks=True,
-			# 				bands=self.isochrones_args["bands"])
-			# #---------------------------------------------------
+			# ------------------------------------------------------------------
+			# Load MIST tracks
+			# ------------------------------------------------------------------
+			tracks = get_ichrone(
+			    "mist",
+			    tracks=True,
+			    bands=self.isochrones_args["bands"]
+			)
 
-			# #------------ Masses ------------------------------
-			# masses = np.random.uniform(
-			# 		low=self.isochrones_args["mass_limits"][0],
-			# 		high=self.isochrones_args["mass_limits"][1],
-			# 		size=n_stars)
-			# #--------------------------------------------------
+			# ------------------------------------------------------------------
+			# Primary masses
+			#
+			# Every simulated object is a stellar system. The primary is
+			# therefore generated for every system, independently of whether
+			# q = 0 or q > 0.
+			# ------------------------------------------------------------------
+			primary_masses = self.random_state.uniform(
+			    low=self.isochrones_args["mass_limits"][0],
+			    high=self.isochrones_args["mass_limits"][1],
+			    size=n_stars
+			)
 
-			# #------- Photometry -----------------------------------------
-			# df_ph = tracks.generate(
-			# 		mass=masses, 
-			# 		age=log_age, 
-			# 		feh=self.isochrones_args["MIST_args"]["metallicity"], 
-			# 		distance=distance, 
-			# 		AV=avs,
-			# 		return_df=True)
-			# df_ph["Av"] = avs
-			# df_ph["distance"] = distance
-			# #-----------------------------------------------------------------
-			if self.isochrones_args["model"] == "MIST":
-				# ------------------------------------------------------------------
-				# MIST isochrones are only valid down to 0.1 Msun.
-				# ------------------------------------------------------------------
-				assert self.isochrones_args["mass_limits"][0] >= 0.1, \
-				    "Error: The lower mass allowed by the MIST model is 0.1. Adjust mass_limits!"
-
-				from isochrones import get_ichrone
-
-				# ------------------------------------------------------------------
-				# Load MIST tracks
-				# ------------------------------------------------------------------
-				tracks = get_ichrone(
-				    "mist",
-				    tracks=True,
-				    bands=self.isochrones_args["bands"]
+			# ------------------------------------------------------------------
+			# Mass ratios
+			#
+			# q = 0 identifies a single-star system.
+			# q > 0 identifies an unresolved binary.
+			# ------------------------------------------------------------------
+			q = generate_mass_ratios(
+				n_stars=n_stars,
+				q_distribution=self.binary_args["q_distribution"],
+				q_limits=self.binary_args["q_limits"],
+				random_state=self.random_state
 				)
 
-				# ------------------------------------------------------------------
-				# Primary masses
-				#
-				# Every simulated object is a stellar system. The primary is
-				# therefore generated for every system, independently of whether
-				# q = 0 or q > 0.
-				# ------------------------------------------------------------------
-				primary_masses = self.random_state.uniform(
-				    low=self.isochrones_args["mass_limits"][0],
-				    high=self.isochrones_args["mass_limits"][1],
-				    size=n_stars
+			# ------------------------------------------------------------------
+			# Secondary masses
+			#
+			# Mathematically:
+			#
+			#     M2 = q * M1
+			#
+			# For q = 0 this gives M2 = 0, but we DO NOT pass M2 = 0 to
+			# isochrones. The zero-mass secondary is instead interpreted as a
+			# zero-flux component.
+			# ------------------------------------------------------------------
+			secondary_masses = q * primary_masses
+
+			is_binary = q > 0.0
+
+			# ------------------------------------------------------------------
+			# Verify that all physical secondary masses are inside the MIST
+			# mass range.
+			#
+			# q = 0 systems are deliberately excluded from this check because
+			# they do not have a physical secondary star.
+			# ------------------------------------------------------------------
+			if np.any(is_binary):
+
+				min_mist_mass = 0.1
+				max_mist_mass = self.isochrones_args["mass_limits"][1]
+
+				invalid_secondary = (
+				    (secondary_masses[is_binary] < min_mist_mass) |
+				    (secondary_masses[is_binary] > max_mist_mass)
 				)
 
-				# ------------------------------------------------------------------
-				# Mass ratios
-				#
-				# q = 0 identifies a single-star system.
-				# q > 0 identifies an unresolved binary.
-				# ------------------------------------------------------------------
-				q = generate_mass_ratios(
-				    n_stars=n_stars,
-				    binary_fraction=self.binary_args["binary_fraction"]
-				    if self.binary_args["enabled"] else 0.0,
-				    q_distribution=self.binary_args["q_distribution"],
-				    q_limits=self.binary_args["q_limits"],
-				    random_state=self.random_state
+				if np.any(invalid_secondary):
+
+					idx_binary = np.where(is_binary)[0]
+					idx_invalid = idx_binary[invalid_secondary]
+
+					raise ValueError(
+					    "Some secondary masses are outside the allowed "
+					    "MIST mass range. "
+					    f"MIST mass range: [{min_mist_mass}, {max_mist_mass}] Msun. "
+					    f"First invalid system index: {idx_invalid[0]}, "
+					    f"M1 = {primary_masses[idx_invalid[0]]:.4f} Msun, "
+					    f"q = {q[idx_invalid[0]]:.4f}, "
+					    f"M2 = {secondary_masses[idx_invalid[0]]:.4f} Msun. "
+					    "Reduce q_limits or adjust mass_limits."
+					)
+
+			# ------------------------------------------------------------------
+			# Primary photometry
+			#
+			# This interpolation is performed for ALL systems.
+			# ------------------------------------------------------------------
+			df_primary = tracks.generate(
+				mass=primary_masses,
+				age=log_age,
+				feh=self.isochrones_args["MIST_args"]["metallicity"],
+				distance=distance,
+				AV=avs,
+				return_df=True
 				)
 
-				# ------------------------------------------------------------------
-				# Secondary masses
-				#
-				# Mathematically:
-				#
-				#     M2 = q * M1
-				#
-				# For q = 0 this gives M2 = 0, but we DO NOT pass M2 = 0 to
-				# isochrones. The zero-mass secondary is instead interpreted as a
-				# zero-flux component.
-				# ------------------------------------------------------------------
-				secondary_masses = q * primary_masses
+			# ------------------------------------------------------------------
+			# Secondary photometry
+			#
+			# Start by copying the primary photometry. This provides a valid
+			# DataFrame with the same number and order of rows as the primary.
+			#
+			# For q = 0 systems these values are only placeholders: the
+			# combine_photometry() function ignores the secondary completely.
+			#
+			# For q > 0 systems, the corresponding rows are replaced by the
+			# actual MIST interpolation of M2.
+			# ------------------------------------------------------------------
+			df_secondary = df_primary.copy()
 
-				is_binary = q > 0.0
+			if np.any(is_binary):
 
-				# ------------------------------------------------------------------
-				# Verify that all physical secondary masses are inside the MIST
-				# mass range.
-				#
-				# q = 0 systems are deliberately excluded from this check because
-				# they do not have a physical secondary star.
-				# ------------------------------------------------------------------
-				if np.any(is_binary):
+				idx_binary = np.where(is_binary)[0]
 
-				    min_mist_mass = self.isochrones_args["mass_limits"][0]
-				    max_mist_mass = self.isochrones_args["mass_limits"][1]
-
-				    invalid_secondary = (
-				        (secondary_masses[is_binary] < min_mist_mass) |
-				        (secondary_masses[is_binary] > max_mist_mass)
-				    )
-
-				    if np.any(invalid_secondary):
-
-				        idx_binary = np.where(is_binary)[0]
-				        idx_invalid = idx_binary[invalid_secondary]
-
-				        raise ValueError(
-				            "Some secondary masses are outside the allowed "
-				            "MIST mass range. "
-				            f"MIST mass range: [{min_mist_mass}, {max_mist_mass}] Msun. "
-				            f"First invalid system index: {idx_invalid[0]}, "
-				            f"M1 = {primary_masses[idx_invalid[0]]:.4f} Msun, "
-				            f"q = {q[idx_invalid[0]]:.4f}, "
-				            f"M2 = {secondary_masses[idx_invalid[0]]:.4f} Msun. "
-				            "Reduce q_limits or adjust mass_limits."
-				        )
-
-				# ------------------------------------------------------------------
-				# Primary photometry
-				#
-				# This interpolation is performed for ALL systems.
-				# ------------------------------------------------------------------
-				df_primary = tracks.generate(
-				    mass=primary_masses,
+				df_secondary_binary = tracks.generate(
+				    mass=secondary_masses[is_binary],
 				    age=log_age,
 				    feh=self.isochrones_args["MIST_args"]["metallicity"],
-				    distance=distance,
-				    AV=avs,
+				    distance=distance[is_binary],
+				    AV=avs[is_binary],
 				    return_df=True
 				)
 
-				# ------------------------------------------------------------------
-				# Secondary photometry
-				#
-				# Start by copying the primary photometry. This provides a valid
-				# DataFrame with the same number and order of rows as the primary.
-				#
-				# For q = 0 systems these values are only placeholders: the
-				# combine_photometry() function ignores the secondary completely.
-				#
-				# For q > 0 systems, the corresponding rows are replaced by the
-				# actual MIST interpolation of M2.
-				# ------------------------------------------------------------------
-				df_secondary = df_primary.copy()
-
-				if np.any(is_binary):
-
-				    idx_binary = np.where(is_binary)[0]
-
-				    df_secondary_binary = tracks.generate(
-				        mass=secondary_masses[is_binary],
-				        age=log_age,
-				        feh=self.isochrones_args["MIST_args"]["metallicity"],
-				        distance=distance[is_binary],
-				        AV=avs[is_binary],
-				        return_df=True
-				    )
-
-				    # Replace only the binary rows.
-				    df_secondary.loc[idx_binary, :] = (
-				        df_secondary_binary.to_numpy()
-				    )
-
-				# ------------------------------------------------------------------
-				# Combine the component photometry.
-				#
-				# q = 0:
-				#     primary + zero flux = primary
-				#
-				# q > 0:
-				#     primary + secondary flux
-				# ------------------------------------------------------------------
-				df_ph = combine_photometry(
-				    primary=df_primary,
-				    secondary=df_secondary,
-				    q=q,
-				    bands=self.isochrones_args["bands"]
+				# Replace only the binary rows.
+				df_secondary.loc[idx_binary, :] = (
+				    df_secondary_binary.to_numpy()
 				)
 
-				# ------------------------------------------------------------------
-				# Store system-level quantities.
-				#
-				# mass is retained as the primary/system mass for backward
-				# compatibility with the existing Amasijo catalogue.
-				# ------------------------------------------------------------------
-				df_ph["mass"] = primary_masses
+			# ------------------------------------------------------------------
+			# Combine the component photometry.
+			#
+			# q = 0:
+			#     primary + zero flux = primary
+			#
+			# q > 0:
+			#     primary + secondary flux
+			# ------------------------------------------------------------------
+			df_ph = combine_photometry(
+			    primary=df_primary,
+			    secondary=df_secondary,
+			    q=q,
+			    bands=self.isochrones_args["bands"]
+			)
 
-				df_ph["mass_secondary"] = np.where(
-				    is_binary,
-				    secondary_masses,
-				    np.nan
-				)
+			# ------------------------------------------------------------------
+			# Store system-level quantities.
+			#
+			# mass is retained as the primary/system mass for backward
+			# compatibility with the existing Amasijo catalogue.
+			# ------------------------------------------------------------------
+			df_ph["mass"] = primary_masses
 
-				df_ph["mass_ratio"] = q
-				df_ph["is_binary"] = is_binary
+			df_ph["mass_secondary"] = np.where(
+			    is_binary,
+			    secondary_masses,
+			    np.nan
+			)
 
-				df_ph["Av"] = avs
-				df_ph["distance"] = distance
+			df_ph["mass_ratio"] = q
+			df_ph["is_binary"] = is_binary
+
+			df_ph["Av"] = avs
+			df_ph["distance"] = distance
 
 		elif self.isochrones_args["model"] == "PARSEC":
 			assert (len(self.isochrones_args["PARSEC_args"]["bands_wavelengths"]) ==
@@ -951,21 +915,36 @@ class Amasijo(object):
 			# #-------------------------------
 
 			#-------------------- Select masses ----------------------
-			df_iso_full = df_iso.query(
+			df_iso_primary = df_iso.query(
 				"mass >= {0} & mass <= {1}".format(
 					*self.isochrones_args["mass_limits"])
 			).copy()
 			#----------------------------------------------------------
 
+			#-------------------- Select secondary masses ----------------------
+			#
+			# The secondary is allowed to extend down to the physical lower
+			# mass limit of the PARSEC grid. It must NOT be restricted to the
+			# primary mass range.
+			#
+			# Primary:   mass_limits[0] <= M1 <= mass_limits[1]
+			# Secondary: 0.1 <= M2 <= mass_limits[1]
+			#
+			df_iso_secondary = df_iso.query(
+			    "mass >= 0.1 & mass <= {0}".format(
+			        self.isochrones_args["mass_limits"][1])
+			).copy()
+			#-------------------------------------------------------------------
+
 			#------------------- Select requested number of stars ----------------
-			n_sources = df_iso_full.shape[0]
+			n_sources = df_iso_primary.shape[0]
 			assert n_sources >= n_stars, \
 				"Error: the PARSEC file for the requested age " + \
 				"only has {0} sources! Reduce n_stars or provide a different file".format(
 					n_sources)
 
 			# Sample the primary component of every stellar system.
-			df_primary = df_iso_full.sample(
+			df_primary = df_iso_primary.sample(
 				n=n_stars,
 				random_state=self.random_state
 			).copy()
@@ -1000,8 +979,6 @@ class Amasijo(object):
 			#==========================================================================
 			q_requested = generate_mass_ratios(
 				n_stars=n_stars,
-				binary_fraction=self.binary_args["binary_fraction"]
-				if self.binary_args["enabled"] else 0.0,
 				q_distribution=self.binary_args["q_distribution"],
 				q_limits=self.binary_args["q_limits"],
 				random_state=self.random_state
@@ -1030,7 +1007,7 @@ class Amasijo(object):
 				dtype=float
 			)
 
-			parsec_masses = df_iso_full["mass"].to_numpy()
+			parsec_masses = df_iso_secondary["mass"].to_numpy()
 
 			if np.any(is_binary):
 
@@ -1046,7 +1023,7 @@ class Amasijo(object):
 					)
 
 					df_secondary.iloc[idx] = (
-						df_iso_full.iloc[idx_secondary].to_numpy()
+						df_iso_secondary.iloc[idx_secondary].to_numpy()
 					)
 
 					mass_secondary[idx] = parsec_masses[idx_secondary]
@@ -1948,7 +1925,6 @@ if __name__ == "__main__":
 					}}
 	binary_args = {
 				"enabled": True,
-				"binary_fraction": 0.5,
 				"q_distribution": "uniform",
 				"q_limits": (0.1, 1.0),
 				}
