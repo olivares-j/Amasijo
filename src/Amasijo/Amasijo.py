@@ -657,12 +657,15 @@ class Amasijo(object):
 			# q = 0 identifies a single-star system.
 			# q > 0 identifies an unresolved binary.
 			# ------------------------------------------------------------------
-			q = generate_mass_ratios(
-				n_stars=n_stars,
-				q_distribution=self.binary_args["q_distribution"],
-				q_limits=self.binary_args["q_limits"],
-				random_state=self.random_state
-				)
+			if self.binary_args["enabled"]:
+				q = generate_mass_ratios(
+					n_stars=n_stars,
+					q_distribution=self.binary_args["q_distribution"],
+					q_limits=self.binary_args["q_limits"],
+					random_state=self.random_state
+					)
+			else:
+				q = np.zeros(n_stars)
 
 			# ------------------------------------------------------------------
 			# Secondary masses
@@ -857,63 +860,6 @@ class Amasijo(object):
 				self.isochrones_args["PARSEC_args"]["max_label"]))
 			#----------------------------------------------------------
 
-			# #-------------------- Select masses ----------------------
-			# df_iso = df_iso.query("mass >= {0} & mass <= {1}".format(
-			# 	*self.isochrones_args["mass_limits"]))
-			# #----------------------------------------------------------
-
-			# #------------------- Select requested number of stars --------------------------------
-			# n_sources = df_iso.shape[0]
-			# assert n_sources >= n_stars,"Error: the PARSEC file for the requested age "+\
-			# "only has {0} sources! Reduce n_stars or provide a different file".format(n_sources)
-			# df_iso = df_iso.sample(n=n_stars)
-			# #--------------------------------------------------------------------------------------
-
-			# #---------- Verify bands ----------------------------------------------------------
-			# requested_bands = np.array([band+"_mag" for band in self.isochrones_args["bands"]])
-			# cnd = sum(np.isin(requested_bands,parsec_bands)) == requested_bands.shape[0]
-			# msg = "Error: requested bands not present in PARSEC files:\n"+\
-			# "Requested: {0}.\n".format(requested_bands)+\
-			# "Available PARSEC bands: {0}".format(parsec_bands)
-			# assert cnd,msg
-			# df_iso.set_index(["logL","logg","mass","Teff","label"],inplace=True)
-			# #-----------------------------------------------------------------------------------
-
-			# #----------- Absolute photometry ---------------------------
-			# df_abs = df_iso.loc[:,requested_bands].copy()
-			# df_abs.rename(columns=lambda x: "abs_"+x,inplace=True)
-			# #-----------------------------------------------------------
-			
-			# #-------------- Apparent photometry -----------------------
-			# df_apa = df_iso.loc[:,requested_bands].copy()
-			# df_apa["distance"] = distance
-			# df_apa["Av"] = avs
-			# for band in requested_bands:
-			# 	df_apa[band] = df_apa.apply(
-			# 	lambda x: x[band] + 5.0*np.log10(x["distance"]) - 5.0,
-			# 	axis=1)
-			# #---------------------------------------------------------
-
-			# #--------------- Redden photometry -------------------------------------
-			# redden = np.zeros((n_stars,len(requested_bands)))
-			# for i in range(n_stars):
-			# 	redden[i] = ccm89(
-			# 	np.array(self.isochrones_args["PARSEC_args"]["bands_wavelengths"]),
-			# 	avs[i],self.isochrones_args["PARSEC_args"]["Rv"])
-			# df_red = pd.DataFrame(
-			# 	data=redden,
-			# 	index=df_apa.index,
-			# 	columns=requested_bands)
-
-			# for band in requested_bands:
-			# 	df_apa[band] += df_red[band]
-			# #--------------------------------------------------------------------
-
-			# #--------- Join ----------------
-			# df_ph = df_apa.join(df_abs)
-			# df_ph.reset_index(inplace=True)
-			# #-------------------------------
-
 			#-------------------- Select masses ----------------------
 			df_iso_primary = df_iso.query(
 				"mass >= {0} & mass <= {1}".format(
@@ -977,12 +923,15 @@ class Amasijo(object):
 			# q = 0 -> single-star system
 			# q > 0 -> unresolved binary system
 			#==========================================================================
-			q_requested = generate_mass_ratios(
-				n_stars=n_stars,
-				q_distribution=self.binary_args["q_distribution"],
-				q_limits=self.binary_args["q_limits"],
-				random_state=self.random_state
-			)
+			if self.binary_args["enabled"]:
+				q_requested = generate_mass_ratios(
+					n_stars=n_stars,
+					q_distribution=self.binary_args["q_distribution"],
+					q_limits=self.binary_args["q_limits"],
+					random_state=self.random_state
+					)
+			else:
+				q_requested = np.zeros(n_stars)
 
 			is_binary = q_requested > 0.0
 
@@ -1113,12 +1062,15 @@ class Amasijo(object):
 			# q > 0:
 			#     primary and secondary fluxes are added.
 			#==========================================================================
-			df_ph = combine_photometry(
-				primary=df_apa_primary,
-				secondary=df_apa_secondary,
-				q=q_requested,
-				bands=self.isochrones_args["bands"]
-			)
+			if self.binary_args["enabled"]:
+				df_ph = combine_photometry(
+					primary=df_apa_primary,
+					secondary=df_apa_secondary,
+					q=q_requested,
+					bands=self.isochrones_args["bands"]
+					)
+			else:
+				df_ph = df_apa_primary.copy()
 
 			#==========================================================================
 			# Add absolute magnitudes of the primary.
@@ -1924,7 +1876,7 @@ if __name__ == "__main__":
 					"omega":np.array([[-1,-1,-1],[1,1,1]])
 					}}
 	binary_args = {
-				"enabled": True,
+				"enabled": False,
 				"q_distribution": "uniform",
 				"q_limits": (0.1, 1.0),
 				}
